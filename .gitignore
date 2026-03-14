@@ -1,0 +1,67 @@
+# -----------------------------
+# OS / Editor
+# -----------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# -----------------------------
+# Logs
+# -----------------------------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# -----------------------------
+# Environment files
+# Keep examples tracked
+# -----------------------------
+.env
+.env.*
+!.env.example
+
+# -----------------------------
+# Node / Next.js (frontend)
+# -----------------------------
+node_modules/
+frontend/web/node_modules/
+frontend/web/.next/
+frontend/web/out/
+frontend/web/build/
+frontend/web/coverage/
+frontend/web/.vercel/
+frontend/web/*.tsbuildinfo
+
+# -----------------------------
+# Python / uv (backend)
+# -----------------------------
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+backend/api/.venv/
+backend/worker/.venv/
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+
+# -----------------------------
+# Future infra local data
+# -----------------------------
+infra/**/.data/
+infra/**/data/
