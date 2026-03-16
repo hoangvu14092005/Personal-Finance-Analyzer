@@ -1,0 +1,17 @@
+[project]
+name = "personal-finance-analyzer-worker"
+version = "0.1.0"
+description = "TaskIQ worker for Personal Finance Analyzer"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "taskiq>=0.11.0,<1.0.0",
+  "taskiq-redis>=1.0.0,<2.0.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = false

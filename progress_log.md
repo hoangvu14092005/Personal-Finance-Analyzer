@@ -179,3 +179,32 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Khi thêm docker compose ở task 0.6, cập nhật thêm ignore cho volume/path thực tế nếu cần.
 - Risks / Notes:
   - Nếu sau này cần commit file `.env` cho môi trường đặc biệt, phải điều chỉnh rule ignore rõ ràng theo thư mục thay vì bỏ global rule.
+
+### 2026-03-16 23:59 - phase-0 - Complete task 0.4 worker TaskIQ
+- Goal:
+  - Hoàn thành task 0.4: khởi tạo worker TaskIQ dùng Redis broker và xác thực demo `ping_task` được consume end-to-end.
+- Files changed:
+  - backend/worker/pyproject.toml
+  - backend/worker/uv.lock
+  - backend/worker/worker_app.py
+  - backend/worker/tasks.py
+  - backend/worker/run_ping.py
+  - backend/worker/README.md
+  - README.md
+  - progress_log.md
+- What was implemented:
+  - Khởi tạo worker Python project bằng uv tại `backend/worker` với dependencies `taskiq` và `taskiq-redis`.
+  - Cấu hình Redis broker và Redis result backend trong `worker_app.py`, dùng `with_result_backend(...)` để tương thích API hiện tại.
+  - Tạo demo task `ping_task` trong `tasks.py` và script dispatch `run_ping.py` để enqueue + wait result.
+  - Chuẩn hóa lệnh chạy worker/dispatch trong README worker và README root bằng `uv run --project` + `--app-dir` để tránh lỗi import do working directory.
+- Validation:
+  - Chạy `python -m uv run --project "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker" python -c "import taskiq, taskiq_redis; print('imports-ok')"`: pass.
+  - Chạy Redis container local (`pfa-redis-dev`) và start worker bằng TaskIQ CLI: pass.
+  - Chạy dispatch script `run_ping.py`: in ra `ping`.
+  - Kiểm tra worker logs: có dòng `Executing task tasks:ping_task`.
+- Pending / Next:
+  - Thực hiện task 0.5: thiết lập `backend/shared` cho config/logging/enums/schemas/utils dùng chung API và worker.
+  - Thực hiện task 0.6: docker-compose local infra đầy đủ (PostgreSQL, Redis, MinIO) và `.env.example` cho từng service.
+- Risks / Notes:
+  - TaskIQ worker startup phụ thuộc app dir; nếu chạy từ thư mục khác cần giữ tham số `--app-dir` như trong README.
+  - Cần đảm bảo Redis local đang chạy trước khi dispatch task.

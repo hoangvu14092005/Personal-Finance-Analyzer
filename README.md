@@ -16,9 +16,9 @@ Monorepo cho ung dung quan ly chi tieu ca nhan, gom frontend, backend API, worke
 Trang thai hien tai da chay duoc:
 - Frontend (Next.js)
 - Backend API (FastAPI)
+- Worker (TaskIQ + Redis)
 
 Chua hoan thanh:
-- Worker (TaskIQ)
 - Local infra day du (PostgreSQL, Redis, MinIO)
 
 ### 1) Prerequisites
@@ -77,6 +77,28 @@ Mo trinh duyet:
 - Cach dung: chay tu `backend/api` voi `app.main:app` nhu lenh o tren.
 - Khong dung `uv run uvicorn main:app --reload` trong `backend/api/app`.
 
+### 5) Run Worker (Task 0.4)
+
+Can Redis chay tai `localhost:6379`.
+
+PowerShell:
+
+```powershell
+python -m uv run --project "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker" taskiq worker --app-dir "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker" worker_app:broker
+```
+
+Mo terminal khac de ban demo task:
+
+```powershell
+python -m uv run --project "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker" python "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker\run_ping.py"
+```
+
+Expected output:
+
+```text
+ping
+```
+
 ## Local Run (Roadmap)
 
 Phase 0 dang duoc thuc hien tung buoc. Luong chay local day du se hoan thien o cac task tiep theo:
@@ -93,4 +115,5 @@ Sau khi hoan thanh cac task tren, du an se ho tro chay local end-to-end.
 - [x] Phase 0.1: Tao boundary thu muc frontend/backend/worker
 - [x] Phase 0.2: Frontend skeleton (Next.js 15 + Tailwind + TypeScript)
 - [x] Phase 0.3: Backend API skeleton (FastAPI + uv + GET /health)
+- [x] Phase 0.4: Worker skeleton (TaskIQ + Redis + ping_task)
 - [ ] Cac task con lai trong phase 0
