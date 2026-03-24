@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115.0,<1.0.0",
+  "personal-finance-analyzer-shared",
   "uvicorn[standard]>=0.30.0,<1.0.0",
 ]
 
@@ -15,3 +16,6 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+personal-finance-analyzer-shared = { path = "../shared" }

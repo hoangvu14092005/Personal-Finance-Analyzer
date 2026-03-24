@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import os
-
+from pfa_shared.config import CommonSettings
+from pfa_shared.logging import get_logger
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+settings = CommonSettings.from_env()
+logger = get_logger("worker", level=settings.log_level)
+logger.info("Initializing worker broker")
 
-broker = ListQueueBroker(url=REDIS_URL).with_result_backend(
-    RedisAsyncResultBackend(redis_url=REDIS_URL),
+broker = ListQueueBroker(url=settings.redis_url).with_result_backend(
+    RedisAsyncResultBackend(redis_url=settings.redis_url),
 )
 
-# Import task module for side effects so tasks are registered on startup.
-import tasks  # noqa: E402,F401

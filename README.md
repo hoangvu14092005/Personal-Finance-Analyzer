@@ -106,7 +106,8 @@ Phase 0 dang duoc thuc hien tung buoc. Luong chay local day du se hoan thien o c
 1. `0.2`: Khoi tao frontend
 2. `0.3`: Khoi tao backend API
 3. `0.4`: Khoi tao worker
-4. `0.6`: Cau hinh local infra (PostgreSQL, Redis, MinIO)
+4. `0.5`: Cau hinh shared Python package cho API/worker
+5. `0.6`: Cau hinh local infra (PostgreSQL, Redis, MinIO)
 
 Sau khi hoan thanh cac task tren, du an se ho tro chay local end-to-end.
 
@@ -116,4 +117,5 @@ Sau khi hoan thanh cac task tren, du an se ho tro chay local end-to-end.
 - [x] Phase 0.2: Frontend skeleton (Next.js 15 + Tailwind + TypeScript)
 - [x] Phase 0.3: Backend API skeleton (FastAPI + uv + GET /health)
 - [x] Phase 0.4: Worker skeleton (TaskIQ + Redis + ping_task)
+- [x] Phase 0.5: Shared package skeleton (config/logging/enums/schemas/utils)
 - [ ] Cac task con lai trong phase 0

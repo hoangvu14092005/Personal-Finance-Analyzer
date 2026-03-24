@@ -208,3 +208,39 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
 - Risks / Notes:
   - TaskIQ worker startup phụ thuộc app dir; nếu chạy từ thư mục khác cần giữ tham số `--app-dir` như trong README.
   - Cần đảm bảo Redis local đang chạy trước khi dispatch task.
+
+### 2026-03-24 15:25 - phase-0 - Complete task 0.5 shared package
+- Goal:
+  - Hoàn thành task 0.5: tạo shared Python package tại `backend/shared` để API và worker cùng dùng chung config, logging, enums, schemas và utility helpers.
+- Files changed:
+  - backend/shared/pyproject.toml
+  - backend/shared/README.md
+  - backend/shared/pfa_shared/__init__.py
+  - backend/shared/pfa_shared/config.py
+  - backend/shared/pfa_shared/enums.py
+  - backend/shared/pfa_shared/schemas.py
+  - backend/shared/pfa_shared/logging.py
+  - backend/shared/pfa_shared/utils.py
+  - backend/api/pyproject.toml
+  - backend/api/app/api/health.py
+  - backend/worker/pyproject.toml
+  - backend/worker/worker_app.py
+  - README.md
+- What was implemented:
+  - Khởi tạo package `personal-finance-analyzer-shared` với module import name `pfa_shared`.
+  - Cung cấp `CommonSettings.from_env()` cho config dùng chung và chuẩn hóa enum môi trường/service (`AppEnv`, `ServiceName`).
+  - Cung cấp schema Pydantic `HealthResponse` để chia sẻ contract response giữa service layers.
+  - Cung cấp helper logger `get_logger(...)` và utility `normalize_whitespace(...)` làm baseline reusable.
+  - Nối dependency local path vào API/worker qua `[tool.uv.sources]` để cả hai project import được package shared mà không cần publish package riêng.
+  - Refactor `GET /health` của API dùng `HealthResponse` + `ServiceName.API` và refactor worker broker init dùng `CommonSettings` + shared logger.
+- Validation:
+  - Chạy `uv sync --project backend/api`: pass.
+  - Chạy `uv sync --project backend/worker`: pass.
+  - Chạy smoke check trong `backend/api`: import `app.api.health` và in `health_check().model_dump()` trả về status/service đúng.
+  - Chạy smoke check trong `backend/worker`: import `worker_app.settings` và `ServiceName.WORKER`, in ra Redis URL và giá trị enum đúng.
+- Pending / Next:
+  - Bắt đầu task 0.6: dựng local infra bằng docker compose (PostgreSQL, Redis, MinIO).
+  - Tạo `.env.example` cho frontend, API, worker để chuẩn hóa local onboarding.
+- Risks / Notes:
+  - `uv` hiển thị warning về `VIRTUAL_ENV` khác project venv path, nhưng dependency resolution và smoke checks đều pass.
+  - Khi chạy quick Python checks cho API/worker cần chạy từ đúng project folder để tránh lỗi import module nội bộ (`app`, `worker_app`).

@@ -123,14 +123,27 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "personal-finance-analyzer-shared" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0,<1.0.0" },
+    { name = "personal-finance-analyzer-shared", directory = "../shared" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0,<1.0.0" },
 ]
+
+[[package]]
+name = "personal-finance-analyzer-shared"
+version = "0.1.0"
+source = { directory = "../shared" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.9.0,<3.0.0" }]
 
 [[package]]
 name = "pydantic"
