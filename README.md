@@ -17,9 +17,10 @@ Trang thai hien tai da chay duoc:
 - Frontend (Next.js)
 - Backend API (FastAPI)
 - Worker (TaskIQ + Redis)
+- Local infra (PostgreSQL, Redis, MinIO)
 
 Chua hoan thanh:
-- Local infra day du (PostgreSQL, Redis, MinIO)
+- Cac task tiep theo trong phase 0 (schema, quality baseline, CI)
 
 ### 1) Prerequisites
 
@@ -54,6 +55,42 @@ Expected:
 
 ```json
 {"status":"ok","service":"api"}
+```
+
+### 2.1) Run Local Infra (Task 0.6)
+
+Luu y: can mo Docker Desktop (hoac Docker daemon) truoc khi chay `docker compose up -d`.
+
+PowerShell:
+
+```powershell
+Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\infra\docker"
+docker compose up -d
+docker compose ps
+```
+
+Services:
+- PostgreSQL: `localhost:5432`
+- Redis: `localhost:6379`
+- MinIO API: `http://localhost:9000`
+- MinIO Console: `http://localhost:9001`
+
+MinIO default credentials:
+- username: `minioadmin`
+- password: `minioadmin`
+
+Bucket `pfa-receipts` duoc tao tu dong boi init service `minio-init`.
+
+Kiem tra nhanh init logs:
+
+```powershell
+docker compose logs minio-init
+```
+
+Dung local infra:
+
+```powershell
+docker compose down
 ```
 
 ### 3) Run Frontend
@@ -99,6 +136,14 @@ Expected output:
 ping
 ```
 
+### 6) Environment Files
+
+Copy env examples thanh `.env` (neu can custom gia tri local):
+
+- `frontend/web/.env.example`
+- `backend/api/.env.example`
+- `backend/worker/.env.example`
+
 ## Local Run (Roadmap)
 
 Phase 0 dang duoc thuc hien tung buoc. Luong chay local day du se hoan thien o cac task tiep theo:
@@ -118,4 +163,5 @@ Sau khi hoan thanh cac task tren, du an se ho tro chay local end-to-end.
 - [x] Phase 0.3: Backend API skeleton (FastAPI + uv + GET /health)
 - [x] Phase 0.4: Worker skeleton (TaskIQ + Redis + ping_task)
 - [x] Phase 0.5: Shared package skeleton (config/logging/enums/schemas/utils)
+- [x] Phase 0.6: Local infra skeleton (PostgreSQL + Redis + MinIO + init bucket + env examples)
 - [ ] Cac task con lai trong phase 0
