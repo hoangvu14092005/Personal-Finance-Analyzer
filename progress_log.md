@@ -209,7 +209,7 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - TaskIQ worker startup phụ thuộc app dir; nếu chạy từ thư mục khác cần giữ tham số `--app-dir` như trong README.
   - Cần đảm bảo Redis local đang chạy trước khi dispatch task.
 
-### 2026-03-24 15:25 - phase-0 - Complete task 0.5 shared package
+### 2026-03-29 15:25 - phase-0 - Complete task 0.5 shared package
 - Goal:
   - Hoàn thành task 0.5: tạo shared Python package tại `backend/shared` để API và worker cùng dùng chung config, logging, enums, schemas và utility helpers.
 - Files changed:
@@ -244,3 +244,96 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
 - Risks / Notes:
   - `uv` hiển thị warning về `VIRTUAL_ENV` khác project venv path, nhưng dependency resolution và smoke checks đều pass.
   - Khi chạy quick Python checks cho API/worker cần chạy từ đúng project folder để tránh lỗi import module nội bộ (`app`, `worker_app`).
+
+### 2026-03-29 15:30 - phase-0 - Align editor import resolution for shared package
+- Goal:
+  - Đồng bộ cấu hình editor để import `pfa_shared` trong worker không còn báo lỗi unresolved dù runtime đã pass.
+- Files changed:
+  - .vscode/settings.json
+  - backend/worker/pyrightconfig.json
+- What was implemented:
+  - Thêm `python.analysis.extraPaths` trỏ tới `backend/shared` trong workspace settings.
+  - Bổ sung `backend/worker/pyrightconfig.json` với `extraPaths` phù hợp cho context worker.
+- Validation:
+  - Re-check lỗi editor tại `backend/worker/worker_app.py`: không còn lỗi import `pfa_shared.*`.
+- Pending / Next:
+  - Chuyển sang task 0.6: local infra (PostgreSQL, Redis, MinIO) + `.env.example`.
+- Risks / Notes:
+  - Nếu đổi cấu trúc thư mục backend trong tương lai, cần cập nhật lại `extraPaths` tương ứng.
+
+### 2026-03-30 09:10 - phase-0 - Continue task 0.6 infra validation
+- Goal:
+  - Hoàn thiện kiểm tra task 0.6 (local infra) sau khi đã có sẵn docker-compose, script init bucket và env examples.
+- Files changed:
+  - README.md
+  - progress_log.md
+- What was implemented:
+  - Rà soát lại artifact 0.6 hiện có: `infra/docker/docker-compose.yml`, `infra/docker/scripts/minio-init.sh`, `backend/api/.env.example`, `backend/worker/.env.example`, `frontend/web/.env.example`.
+  - Bổ sung note trong README yêu cầu Docker daemon/Docker Desktop phải chạy trước khi gọi `docker compose up -d`.
+- Validation:
+  - Chạy `docker compose config` tại `infra/docker`: pass, cấu hình được render đầy đủ.
+  - Chạy `docker compose up -d`: fail do Docker engine chưa sẵn sàng (`open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified`).
+  - Chạy `docker compose ps`: chưa có container chạy do lỗi engine.
+- Pending / Next:
+  - Khởi động Docker Desktop (hoặc Docker daemon), sau đó chạy lại:
+    - `docker compose up -d`
+    - `docker compose ps`
+    - `docker compose logs minio-init`
+  - Khi các service lên thành công, đánh dấu 0.6 done hoàn toàn.
+- Risks / Notes:
+  - Trạng thái hiện tại: artifact 0.6 đã có đủ; phần acceptance "services up" phụ thuộc môi trường Docker local.
+
+### 2026-03-30 09:22 - phase-0 - Complete task 0.6 infra bring-up
+- Goal:
+  - Chạy và xác thực end-to-end local infra cho task 0.6 sau khi Docker daemon sẵn sàng.
+- Files changed:
+  - progress_log.md
+- What was implemented:
+  - Chạy `docker compose up -d` tại `infra/docker` để khởi động PostgreSQL, Redis, MinIO và `minio-init`.
+  - Xử lý xung đột tên container cũ `pfa-redis-dev` (stopped) bằng `docker rm pfa-redis-dev`, sau đó bring-up lại thành công.
+  - Theo dõi `docker compose logs minio-init` để xác nhận bucket `pfa-receipts` được tạo thành công.
+- Validation:
+  - `docker compose ps` hiển thị:
+    - `pfa-postgres-dev`: healthy
+    - `pfa-redis-dev`: healthy
+    - `pfa-minio-dev`: up
+  - `minio-init` log có dòng `Bucket initialization complete.`.
+- Pending / Next:
+  - Chuyển sang task 0.7 (database schema v1 + Alembic).
+- Risks / Notes:
+  - Khi đã xác nhận xong local infra, có thể dùng `docker compose down` để tắt services nếu không cần chạy nền.
+
+### 2026-03-30 10:35 - phase-0 - Complete task 0.7 database schema v1
+- Goal:
+  - Hoàn thành task 0.7: thiết lập Alembic, tạo SQLModel entities v1, migration đầu tiên và seed category mặc định.
+- Files changed:
+  - backend/api/pyproject.toml
+  - backend/api/app/core/database.py
+  - backend/api/app/models/entities.py
+  - backend/api/app/models/__init__.py
+  - backend/api/alembic.ini
+  - backend/api/alembic/env.py
+  - backend/api/alembic/script.py.mako
+  - backend/api/alembic/versions/c9702a06526e_create_initial_schema.py
+  - backend/api/scripts/__init__.py
+  - backend/api/scripts/seed_categories.py
+  - backend/api/README.md
+  - progress_log.md
+- What was implemented:
+  - Thêm dependencies database/migration cho API: `sqlmodel`, `alembic`, `psycopg[binary]`.
+  - Tạo model SQLModel cho 8 entity lõi: `User`, `ReceiptUpload`, `OcrResult`, `Transaction`, `Category`, `Budget`, `InsightSnapshot`, `UserMerchantMapping`.
+  - Thiết lập `app/core/database.py` với engine/session và URL mặc định PostgreSQL local.
+  - Cấu hình Alembic (`alembic.ini`, `alembic/env.py`, `alembic/script.py.mako`) dùng metadata từ SQLModel.
+  - Tạo migration đầu tiên `c9702a06526e_create_initial_schema.py` bằng autogenerate.
+  - Tạo seed script `scripts/seed_categories.py` với 8 category mặc định hệ thống.
+- Validation:
+  - `uv sync --project backend/api`: pass.
+  - `alembic revision --autogenerate -m "create initial schema"`: pass (sinh revision đầu tiên).
+  - `alembic upgrade head`: pass trên PostgreSQL qua container network (`Context impl PostgresqlImpl`, chạy upgrade tới revision đầu).
+  - `python -m scripts.seed_categories`: pass, in ra `Seeded 8 default categories.`.
+  - Query kiểm tra bằng `psql`: `total_categories = 8`.
+- Pending / Next:
+  - Task 0.8: config/settings/logging chuẩn và request correlation id baseline.
+  - Task 0.9: quality baseline (ruff, mypy, pytest) và scripts check.
+- Risks / Notes:
+  - Từ host Windows có hiện tượng auth mismatch khi kết nối `localhost:5432`; workaround đã dùng là chạy migration/seed trong container cùng network `pfa-local-network`.
