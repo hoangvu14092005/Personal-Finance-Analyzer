@@ -466,3 +466,26 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Task 1.3: JWT + cookie session service.
 - Risks / Notes:
   - Migration cần được chạy trên DB local/staging trước khi mở task API register/login để đảm bảo schema mới đã sẵn sàng.
+
+### 2026-03-30 14:08 - phase-1 - Complete task 1.2 password hashing service
+- Goal:
+  - Hoàn thành task 1.2: tạo service hash/verify password và unit tests.
+- Files changed:
+  - backend/api/app/services/password_service.py
+  - backend/api/tests/test_password_service.py
+  - backend/api/pyproject.toml
+  - backend/api/uv.lock
+  - progress_log.md
+- What was implemented:
+  - Tạo `hash_password(...)` và `verify_password(...)` trong `password_service.py`.
+  - Dùng `pwdlib` với backend `argon2` để lưu mật khẩu theo dạng hash.
+  - Thêm 3 test cases: hash không trùng plaintext, verify đúng password, verify sai password.
+- Validation:
+  - `uv sync --all-groups` tại `backend/api`: pass.
+  - `uv run pytest tests/test_password_service.py`: pass (3 tests).
+  - `uv run ruff check app tests`: pass.
+- Pending / Next:
+  - Task 1.3: JWT + cookie session service.
+  - Task 1.4-1.7: auth APIs register/login/logout/me.
+- Risks / Notes:
+  - `pwdlib.recommended()` yêu cầu backend argon2; đã bổ sung extra `pwdlib[argon2]` để tránh lỗi runtime.
