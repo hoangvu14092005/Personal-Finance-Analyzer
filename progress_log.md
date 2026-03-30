@@ -514,3 +514,28 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Sau backend auth xong sẽ nối frontend login/register và protected routes.
 - Risks / Notes:
   - Giá trị `JWT_SECRET` mặc định chỉ dùng cho local dev; môi trường thật bắt buộc override bằng secret mạnh qua env.
+
+### 2026-03-30 14:25 - phase-1 - Complete task 1.4 register API
+- Goal:
+  - Hoàn thành task 1.4: triển khai `POST /api/v1/auth/register` với kiểm tra email unique.
+- Files changed:
+  - backend/api/app/api/v1/auth.py
+  - backend/api/app/api/v1/__init__.py
+  - backend/api/app/main.py
+  - backend/api/tests/test_auth_register.py
+  - backend/api/pyproject.toml
+  - progress_log.md
+- What was implemented:
+  - Tạo router `auth` tại `app/api/v1/auth.py` và nối vào `settings.api_v1_prefix`.
+  - Thêm endpoint register tạo user mới, hash password và trả `AuthResponse`.
+  - Xử lý duplicate email bằng `409 Conflict`.
+  - Viết integration tests cho register thành công và duplicate email.
+- Validation:
+  - `uv run ruff check app tests --fix` rồi `uv run ruff check app tests`: pass.
+  - `uv run mypy app`: pass.
+  - `uv run pytest tests/test_auth_register.py`: pass (2 tests).
+- Pending / Next:
+  - Task 1.5: login API + set auth cookie.
+  - Task 1.6: logout API clear cookie.
+- Risks / Notes:
+  - Register hiện chưa auto-login; cookie session sẽ được thiết lập ở task login để giữ flow rõ ràng.
