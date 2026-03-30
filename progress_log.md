@@ -582,3 +582,27 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Task 1.7: endpoint `GET /auth/me` đọc current user từ cookie/JWT.
 - Risks / Notes:
   - Logout hiện clear cookie phía client-side; chưa có blacklist token server-side (có thể bổ sung ở hardening phase).
+
+### 2026-03-30 14:47 - phase-1 - Complete task 1.7 current user endpoint
+- Goal:
+  - Hoàn thành task 1.7: triển khai `GET /api/v1/auth/me` và dependency lấy current user từ cookie JWT.
+- Files changed:
+  - backend/api/app/dependencies/auth.py
+  - backend/api/app/dependencies/__init__.py
+  - backend/api/app/api/v1/auth.py
+  - backend/api/tests/test_auth_me.py
+  - progress_log.md
+- What was implemented:
+  - Tạo dependency `get_current_user` đọc session cookie theo `SESSION_COOKIE_NAME`, verify JWT và load user từ DB.
+  - Thêm endpoint `GET /api/v1/auth/me` trả `AuthResponse`.
+  - Xử lý các case lỗi auth: thiếu cookie, token invalid, user không tồn tại.
+  - Viết test cho case cookie hợp lệ (200) và không có cookie (401).
+- Validation:
+  - `uv run ruff check app tests --fix` và re-check: pass.
+  - `uv run mypy app`: pass.
+  - `uv run pytest tests/test_auth_me.py`: pass (2 tests).
+- Pending / Next:
+  - Task 1.8-1.10 phía frontend: login/register pages + protected routes + profile init flow.
+  - Task 1.11: test pack auth flow đầy đủ.
+- Risks / Notes:
+  - Dependency hiện verify access token trực tiếp từ cookie; khi thêm refresh-token flow cần mở rộng logic phân loại token type.

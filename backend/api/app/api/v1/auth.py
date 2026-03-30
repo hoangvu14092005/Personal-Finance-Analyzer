@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 
 from app.core.database import get_session
 from app.core.security import clear_auth_cookie, create_access_token, set_auth_cookie
+from app.dependencies.auth import get_current_user
 from app.models.entities import User
 from app.schemas.auth import AuthResponse, LoginRequest, ProfileResponse, RegisterRequest
 from app.services.password_service import hash_password, verify_password
@@ -83,3 +84,8 @@ def logout(response: Response) -> Response:
     clear_auth_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
+
+
+@router.get("/me", response_model=AuthResponse)
+def get_me(current_user: User = Depends(get_current_user)) -> AuthResponse:
+    return AuthResponse(user=to_profile_response(current_user))
