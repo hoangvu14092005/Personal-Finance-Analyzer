@@ -14,6 +14,9 @@ class User(SQLModel, table=True):
     email: str = Field(index=True, unique=True, max_length=255)
     password_hash: str = Field(max_length=255)
     full_name: str | None = Field(default=None, max_length=255)
+    currency: str = Field(default="VND", max_length=10)
+    timezone: str = Field(default="Asia/Ho_Chi_Minh", max_length=64)
+    locale: str = Field(default="vi-VN", max_length=16)
     is_active: bool = Field(default=True)
     created_at: datetime = Field(
         sa_column=Column(

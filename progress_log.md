@@ -439,3 +439,30 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Chuyển sang phase 1 (auth & session), bắt đầu task 1.1.
 - Risks / Notes:
   - Chưa có migration DB/Redis service container trong CI vì phase 1 hiện chưa cần integration test phụ thuộc hạ tầng ngoài.
+
+### 2026-03-30 13:58 - phase-1 - Complete task 1.1 user model and auth schemas
+- Goal:
+  - Hoàn thành task 1.1: cập nhật `User` model và tạo schema typed cho register/login/profile.
+- Files changed:
+  - backend/api/app/models/entities.py
+  - backend/api/app/schemas/auth.py
+  - backend/api/app/schemas/__init__.py
+  - backend/api/alembic/versions/f2a1bb149083_add_user_profile_defaults.py
+  - backend/api/pyproject.toml
+  - backend/api/uv.lock
+  - progress_log.md
+- What was implemented:
+  - Mở rộng `User` model với profile mặc định: `currency`, `timezone`, `locale`.
+  - Tạo auth schemas: `RegisterRequest`, `LoginRequest`, `ProfileResponse`, `AuthResponse`.
+  - Áp dụng validation password cơ bản (bắt buộc có cả chữ và số) và dùng `EmailStr` cho email.
+  - Tạo migration Alembic mới thêm 3 cột profile vào bảng `users` với server defaults để không phá dữ liệu cũ.
+  - Bổ sung dependency `email-validator` phục vụ `EmailStr`.
+- Validation:
+  - `uv sync --all-groups` trong `backend/api`: pass.
+  - `uv run ruff check app tests`: pass.
+  - `uv run mypy app`: pass.
+- Pending / Next:
+  - Task 1.2: password hashing service + unit test.
+  - Task 1.3: JWT + cookie session service.
+- Risks / Notes:
+  - Migration cần được chạy trên DB local/staging trước khi mở task API register/login để đảm bảo schema mới đã sẵn sàng.
