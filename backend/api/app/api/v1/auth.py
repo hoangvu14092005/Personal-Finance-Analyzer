@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlmodel import Session, select
 
 from app.core.database import get_session
-from app.core.security import create_access_token, set_auth_cookie
+from app.core.security import clear_auth_cookie, create_access_token, set_auth_cookie
 from app.models.entities import User
 from app.schemas.auth import AuthResponse, LoginRequest, ProfileResponse, RegisterRequest
 from app.services.password_service import hash_password, verify_password
@@ -76,3 +76,10 @@ def login(
     set_auth_cookie(response, access_token)
 
     return AuthResponse(user=to_profile_response(user))
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(response: Response) -> Response:
+    clear_auth_cookie(response)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response

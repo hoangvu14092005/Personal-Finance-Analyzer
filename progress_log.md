@@ -562,3 +562,23 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Task 1.7: `GET /auth/me` + dependency current user.
 - Risks / Notes:
   - Luồng login hiện dùng access token ngắn hạn qua cookie; refresh token rotation sẽ mở rộng ở hardening phase nếu cần.
+
+### 2026-03-30 14:38 - phase-1 - Complete task 1.6 logout API
+- Goal:
+  - Hoàn thành task 1.6: triển khai `POST /api/v1/auth/logout` để clear auth cookie.
+- Files changed:
+  - backend/api/app/api/v1/auth.py
+  - backend/api/tests/test_auth_logout.py
+  - progress_log.md
+- What was implemented:
+  - Thêm endpoint logout trả `204 No Content`.
+  - Dùng helper `clear_auth_cookie` để expire cookie session.
+  - Thêm test xác nhận response có header `Set-Cookie` với cookie `pfa_session` bị clear.
+- Validation:
+  - `uv run ruff check app tests --fix` và re-check: pass.
+  - `uv run mypy app`: pass.
+  - `uv run pytest tests/test_auth_logout.py`: pass.
+- Pending / Next:
+  - Task 1.7: endpoint `GET /auth/me` đọc current user từ cookie/JWT.
+- Risks / Notes:
+  - Logout hiện clear cookie phía client-side; chưa có blacklist token server-side (có thể bổ sung ở hardening phase).
