@@ -685,3 +685,39 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Bắt đầu phase 2 (receipt upload & OCR pipeline) từ task 2.1.
 - Risks / Notes:
   - Frontend E2E cho auth chưa thêm Playwright trong phase này; hiện mới có backend integration tests + frontend build checks.
+
+### 2026-03-30 15:35 - phase-2 - Complete tasks 2.1 to 2.3 foundation
+- Goal:
+  - Hoàn thành nền tảng phase 2 gồm domain status cho receipt/OCR, file validation rules và storage abstraction.
+- Files changed:
+  - backend/shared/pfa_shared/enums.py
+  - backend/shared/pfa_shared/config.py
+  - backend/api/app/core/config.py
+  - backend/api/app/models/entities.py
+  - backend/api/alembic/versions/8ae8dfe4de39_extend_receipt_upload_metadata.py
+  - backend/api/app/schemas/receipts.py
+  - backend/api/app/schemas/__init__.py
+  - backend/api/app/services/receipt_validation.py
+  - backend/api/app/integrations/storage/base.py
+  - backend/api/app/integrations/storage/local.py
+  - backend/api/app/integrations/storage/factory.py
+  - backend/api/app/integrations/storage/__init__.py
+  - progress_log.md
+- What was implemented:
+  - Chuẩn hóa enum trạng thái `ReceiptStatus` (`uploaded/processing/ready/failed`) trong shared package.
+  - Mở rộng settings chung cho OCR/storage (`OCR_PROVIDER`, `OCR_TIMEOUT_MS`, `OCR_MAX_FILE_SIZE_MB`, `S3_*`).
+  - Mở rộng `ReceiptUpload` model với `file_size_bytes`, `error_code`, `error_message` và status default theo enum.
+  - Tạo migration thêm các cột metadata receipt upload.
+  - Tạo receipt schemas cho upload response, status polling response và OCR result response.
+  - Tạo validation service cho MIME/extension/size.
+  - Dựng storage abstraction và local storage implementation (S3-compatible factory point đã sẵn để mở rộng).
+- Validation:
+  - `uv run ruff check app tests --fix` và re-check: pass.
+  - `uv run mypy app`: pass.
+  - `uv sync --reinstall-package personal-finance-analyzer-shared` + `uv run pytest tests/test_auth_flow.py`: pass (regression auth).
+- Pending / Next:
+  - Task 2.4: upload API (`POST /receipts/upload`) + create receipt record + enqueue OCR.
+  - Task 2.5-2.7: OCR provider abstraction, normalization, worker job `process_ocr_job`.
+  - Task 2.8-2.10: polling APIs + frontend upload flow + fallback khi OCR fail.
+- Risks / Notes:
+  - Storage factory hiện dùng local filesystem cho local/test để giảm phụ thuộc runtime; S3/MinIO adapter sẽ nối vào cùng interface ở bước tiếp theo.

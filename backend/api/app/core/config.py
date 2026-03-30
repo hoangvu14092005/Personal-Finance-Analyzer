@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     )
     redis_url: str = Field(default="redis://localhost:6379/0")
 
+    s3_endpoint: str = "http://localhost:9000"
+    s3_region: str = "us-east-1"
+    s3_access_key: str = "minioadmin"
+    s3_secret_key: str = "minioadmin"
+    s3_bucket_private: str = "pfa-receipts"
+    ocr_provider: str = "mock"
+    ocr_timeout_ms: int = 8000
+    ocr_max_file_size_mb: int = 10
+
     request_id_header: str = "X-Request-ID"
 
     jwt_secret: str = "change-me-in-prod-please-use-at-least-32-chars"

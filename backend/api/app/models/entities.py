@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
+from pfa_shared.enums import ReceiptStatus
 from sqlalchemy import Column, DateTime, Numeric, func
 from sqlmodel import Field, SQLModel
 
@@ -34,8 +35,11 @@ class ReceiptUpload(SQLModel, table=True):
     user_id: int = Field(foreign_key="users.id", index=True)
     file_name: str = Field(max_length=255)
     content_type: str = Field(max_length=100)
+    file_size_bytes: int = Field(default=0)
     storage_key: str = Field(max_length=500)
-    status: str = Field(default="uploaded", max_length=50)
+    status: str = Field(default=ReceiptStatus.UPLOADED.value, max_length=50)
+    error_code: str | None = Field(default=None, max_length=100)
+    error_message: str | None = Field(default=None, max_length=500)
     created_at: datetime = Field(
         sa_column=Column(
             DateTime(timezone=True),
@@ -54,7 +58,7 @@ class OcrResult(SQLModel, table=True):
     raw_text: str | None = Field(default=None)
     confidence: float | None = Field(default=None)
     normalized_payload: str | None = Field(default=None)
-    status: str = Field(default="needs_review", max_length=50)
+    status: str = Field(default=ReceiptStatus.READY.value, max_length=50)
     created_at: datetime = Field(
         sa_column=Column(
             DateTime(timezone=True),

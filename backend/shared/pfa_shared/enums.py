@@ -21,3 +21,10 @@ class AppEnv(StrEnum):
 class ServiceName(StrEnum):
     API = "api"
     WORKER = "worker"
+
+
+class ReceiptStatus(StrEnum):
+    UPLOADED = "uploaded"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
