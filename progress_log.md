@@ -421,3 +421,21 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Sau khi xong phase 0 sẽ chuyển sang phase 1 (auth).
 - Risks / Notes:
   - Build static của Next.js không đảm bảo backend runtime luôn online; trạng thái online/offline được quyết định tại runtime trên browser.
+
+### 2026-03-30 13:48 - phase-0 - Complete task 0.11 CI baseline
+- Goal:
+  - Hoàn thành task 0.11: tạo CI pipeline baseline cho frontend và backend.
+- Files changed:
+  - .github/workflows/ci.yml
+  - progress_log.md
+- What was implemented:
+  - Tạo workflow GitHub Actions chạy trên `push` vào `main` và `pull_request`.
+  - Job `frontend`: setup Node 20 + pnpm, cài deps và chạy `pnpm lint`, `pnpm build` tại `frontend/web`.
+  - Job `backend`: setup Python 3.12 + uv, chạy checks cho API (`ruff`, `mypy`, `pytest`) và worker (`ruff`, `mypy`, `pytest`).
+- Validation:
+  - Kiểm tra cấu trúc workflow và command khớp lệnh đã chạy pass ở local cho task 0.9/0.10.
+  - Xác nhận đường dẫn lockfile/cache và working-directory đúng với monorepo hiện tại.
+- Pending / Next:
+  - Chuyển sang phase 1 (auth & session), bắt đầu task 1.1.
+- Risks / Notes:
+  - Chưa có migration DB/Redis service container trong CI vì phase 1 hiện chưa cần integration test phụ thuộc hạ tầng ngoài.
