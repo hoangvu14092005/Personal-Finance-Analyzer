@@ -66,3 +66,25 @@ def test_register_duplicate_email_returns_conflict() -> None:
 
     assert first.status_code == 201
     assert second.status_code == 409
+
+
+def test_register_without_profile_fields_uses_defaults() -> None:
+    _reset_database()
+    app.dependency_overrides[get_session] = _override_session_factory
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "default-profile@example.com",
+                "password": "StrongPass123",
+            },
+        )
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    payload = response.json()["user"]
+    assert payload["currency"] == "VND"
+    assert payload["timezone"] == "Asia/Ho_Chi_Minh"
+    assert payload["locale"] == "vi-VN"

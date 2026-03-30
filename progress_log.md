@@ -650,3 +650,21 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Task 1.11: tổng hợp test auth flow backend/frontend.
 - Risks / Notes:
   - Guard hiện ở client runtime (không phải middleware server-side), nên lần render đầu có thể thấy trạng thái loading ngắn trước khi redirect.
+
+### 2026-03-30 15:04 - phase-1 - Complete task 1.10 onboarding profile init
+- Goal:
+  - Hoàn thành task 1.10: đảm bảo user mới có profile mặc định usable cho phase sau.
+- Files changed:
+  - backend/api/tests/test_auth_register.py
+  - progress_log.md
+- What was implemented:
+  - Bổ sung integration test cho case register không truyền profile fields.
+  - Xác nhận backend gán đúng default profile: `currency=VND`, `timezone=Asia/Ho_Chi_Minh`, `locale=vi-VN`.
+- Validation:
+  - `uv run pytest tests/test_auth_register.py`: pass (3 tests).
+  - `uv run ruff check app tests`: pass.
+- Pending / Next:
+  - Task 1.11: gom test auth flow đầy đủ (register/login/logout/me).
+  - Sau khi pass phase 1 sẽ chuyển phase 2 receipts + OCR pipeline.
+- Risks / Notes:
+  - Giá trị profile default hiện hardcode cho MVP Việt Nam; nếu mở rộng multi-region cần profile setup linh hoạt hơn.
