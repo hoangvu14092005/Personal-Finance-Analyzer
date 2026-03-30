@@ -721,3 +721,34 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Task 2.8-2.10: polling APIs + frontend upload flow + fallback khi OCR fail.
 - Risks / Notes:
   - Storage factory hiện dùng local filesystem cho local/test để giảm phụ thuộc runtime; S3/MinIO adapter sẽ nối vào cùng interface ở bước tiếp theo.
+
+### 2026-03-30 15:46 - phase-2 - Complete tasks 2.4 and 2.8 receipt APIs
+- Goal:
+  - Hoàn thành upload API và status polling APIs cho receipt/OCR draft flow.
+- Files changed:
+  - backend/api/app/api/v1/receipts.py
+  - backend/api/app/main.py
+  - backend/api/pyproject.toml
+  - backend/api/uv.lock
+  - backend/api/tests/test_receipts_api.py
+  - progress_log.md
+- What was implemented:
+  - Thêm `POST /api/v1/receipts/upload`:
+    - xác thực user qua cookie,
+    - validate extension/MIME/size,
+    - upload bytes vào storage abstraction,
+    - tạo `ReceiptUpload` record và trả `receipt_id + status`.
+  - Thêm `GET /api/v1/receipts/{receipt_id}` để poll trạng thái xử lý.
+  - Thêm `GET /api/v1/receipts/{receipt_id}/ocr-result` để lấy OCR result khi sẵn sàng.
+  - Nối router receipts vào main app và thêm dependency `python-multipart` cho upload file.
+  - Viết integration test cho luồng upload + poll status + OCR result not ready (404).
+- Validation:
+  - `uv sync --all-groups`: pass.
+  - `uv run ruff check app tests`: pass.
+  - `uv run mypy app`: pass.
+  - `uv run pytest tests/test_receipts_api.py`: pass.
+- Pending / Next:
+  - Task 2.5-2.7: OCR provider abstraction + normalization + worker `process_ocr_job` và cơ chế enqueue.
+  - Task 2.9-2.10: frontend upload flow + fallback manual entry khi OCR fail.
+- Risks / Notes:
+  - Endpoint upload hiện mới tạo record trạng thái `uploaded`; bước enqueue worker OCR sẽ được nối ở task tiếp theo để hoàn tất async pipeline.
