@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlmodel import Session, select
 
 from app.core.database import get_session
+from app.core.security import create_access_token, set_auth_cookie
 from app.models.entities import User
-from app.schemas.auth import AuthResponse, ProfileResponse, RegisterRequest
-from app.services.password_service import hash_password
+from app.schemas.auth import AuthResponse, LoginRequest, ProfileResponse, RegisterRequest
+from app.services.password_service import hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -48,5 +49,30 @@ def register(
     session.add(user)
     session.commit()
     session.refresh(user)
+
+    return AuthResponse(user=to_profile_response(user))
+
+
+@router.post("/login", response_model=AuthResponse)
+def login(
+    payload: LoginRequest,
+    response: Response,
+    session: Session = Depends(get_session),
+) -> AuthResponse:
+    user = session.exec(select(User).where(User.email == payload.email)).first()
+    if user is None or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    if user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Invalid user profile",
+        )
+
+    access_token = create_access_token(user_id=user.id, email=user.email)
+    set_auth_cookie(response, access_token)
 
     return AuthResponse(user=to_profile_response(user))

@@ -539,3 +539,26 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Task 1.6: logout API clear cookie.
 - Risks / Notes:
   - Register hiện chưa auto-login; cookie session sẽ được thiết lập ở task login để giữ flow rõ ràng.
+
+### 2026-03-30 14:33 - phase-1 - Complete task 1.5 login API
+- Goal:
+  - Hoàn thành task 1.5: triển khai `POST /api/v1/auth/login` và set session cookie.
+- Files changed:
+  - backend/api/app/api/v1/auth.py
+  - backend/api/tests/test_auth_login.py
+  - progress_log.md
+- What was implemented:
+  - Thêm endpoint login nhận email/password.
+  - Verify credentials bằng `verify_password`.
+  - Tạo JWT access token và set HttpOnly cookie `pfa_session` bằng helper `set_auth_cookie`.
+  - Trả profile user khi login thành công.
+  - Trả `401` khi thông tin đăng nhập sai.
+- Validation:
+  - `uv run ruff check app tests --fix` và re-check: pass.
+  - `uv run mypy app`: pass.
+  - `uv run pytest tests/test_auth_login.py`: pass (2 tests).
+- Pending / Next:
+  - Task 1.6: logout API clear cookie.
+  - Task 1.7: `GET /auth/me` + dependency current user.
+- Risks / Notes:
+  - Luồng login hiện dùng access token ngắn hạn qua cookie; refresh token rotation sẽ mở rộng ở hardening phase nếu cần.
