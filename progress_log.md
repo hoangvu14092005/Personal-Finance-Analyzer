@@ -489,3 +489,28 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Task 1.4-1.7: auth APIs register/login/logout/me.
 - Risks / Notes:
   - `pwdlib.recommended()` yêu cầu backend argon2; đã bổ sung extra `pwdlib[argon2]` để tránh lỗi runtime.
+
+### 2026-03-30 14:15 - phase-1 - Complete task 1.3 JWT cookie session service
+- Goal:
+  - Hoàn thành task 1.3: xây dựng JWT access token service và helper set/clear HttpOnly cookie.
+- Files changed:
+  - backend/api/app/core/config.py
+  - backend/api/app/core/security.py
+  - backend/api/tests/test_security.py
+  - backend/api/pyproject.toml
+  - backend/api/uv.lock
+  - progress_log.md
+- What was implemented:
+  - Thêm `pyjwt` dependency và triển khai `create_access_token`, `verify_access_token`.
+  - Triển khai helper `set_auth_cookie`, `clear_auth_cookie` với cấu hình `HttpOnly`, `Secure`, `SameSite`, `max_age`.
+  - Mở rộng settings cho auth: `JWT_SECRET`, `JWT_ACCESS_EXPIRE_MINUTES`, `JWT_REFRESH_EXPIRE_DAYS`, `SESSION_COOKIE_*`.
+  - Viết test cho token roundtrip và cookie set/clear behavior.
+- Validation:
+  - `uv run ruff check app tests`: pass.
+  - `uv run mypy app`: pass.
+  - `uv run pytest tests/test_security.py`: pass (3 tests).
+- Pending / Next:
+  - Task 1.4-1.7: register/login/logout/me APIs + current user dependency.
+  - Sau backend auth xong sẽ nối frontend login/register và protected routes.
+- Risks / Notes:
+  - Giá trị `JWT_SECRET` mặc định chỉ dùng cho local dev; môi trường thật bắt buộc override bằng secret mạnh qua env.
