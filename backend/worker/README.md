@@ -36,3 +36,19 @@ ping
 ```
 
 Worker terminal should log execution of `ping_task`.
+
+## Quality checks (Task 0.9)
+
+Install dev dependencies:
+
+```powershell
+python -m uv sync --all-groups
+```
+
+Run lint, typecheck, tests:
+
+```powershell
+python -m uv run ruff check . tests
+python -m uv run mypy .
+python -m uv run pytest
+```

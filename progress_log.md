@@ -367,3 +367,36 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Task 0.10: frontend gọi backend health thật (online/offline).
 - Risks / Notes:
   - Môi trường hiện vẫn xuất cảnh báo `VIRTUAL_ENV` khi dùng `uv --project`; không ảnh hưởng kết quả chạy nhưng cần đồng bộ cách dùng venv trong tài liệu kỹ thuật.
+
+### 2026-03-30 13:35 - phase-0 - Complete task 0.9 quality baseline
+- Goal:
+  - Hoàn thành task 0.9: thiết lập baseline Ruff, mypy, pytest cho backend API và worker, kèm smoke tests tối thiểu.
+- Files changed:
+  - backend/api/pyproject.toml
+  - backend/api/uv.lock
+  - backend/api/app/core/logging.py
+  - backend/api/app/middleware/request_id.py
+  - backend/api/app/models/__init__.py
+  - backend/api/app/models/entities.py
+  - backend/api/tests/test_health.py
+  - backend/api/README.md
+  - backend/worker/pyproject.toml
+  - backend/worker/uv.lock
+  - backend/worker/tasks.py
+  - backend/worker/tests/test_ping_task.py
+  - backend/worker/README.md
+  - progress_log.md
+- What was implemented:
+  - Thêm dependency group `dev` cho API/worker gồm `ruff`, `mypy`, `pytest` (và `httpx`, `pytest-asyncio` cho API).
+  - Thêm cấu hình `tool.ruff`, `tool.mypy`, `tool.pytest.ini_options` cho cả 2 project Python.
+  - Tạo test API `test_health.py` xác nhận status code, payload và propagation của header `X-Request-ID`.
+  - Refactor `ping_task` để có helper thuần `build_ping_response()` và thêm test worker `test_ping_task.py`.
+  - Bổ sung hướng dẫn lệnh quality checks trong README của API và worker.
+- Validation:
+  - API: `uv run ruff check app tests`, `uv run mypy app`, `uv run pytest` -> pass.
+  - Worker: `uv run ruff check . tests`, `uv run mypy .`, `uv run pytest` -> pass.
+- Pending / Next:
+  - Task 0.10: frontend gọi backend `GET /health` thật, hiển thị online/offline.
+  - Task 0.11: thêm CI baseline để chạy checks tự động.
+- Risks / Notes:
+  - Shell hiện dùng venv root nên `uv` vẫn cảnh báo lệch `VIRTUAL_ENV`; checks vẫn pass nhưng nên thống nhất cách activate venv theo từng project khi làm việc nhóm.

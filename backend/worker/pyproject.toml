@@ -14,6 +14,36 @@ dependencies = [
 requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+  "mypy>=1.11.0,<2.0.0",
+  "pytest>=8.3.0,<9.0.0",
+  "ruff>=0.6.0,<1.0.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = [".", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+warn_unused_configs = true
+disable_error_code = ["import-untyped"]
+
+[[tool.mypy.overrides]]
+module = ["taskiq_redis.*", "taskiq.*", "pfa_shared.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
 [tool.uv]
 package = false
 

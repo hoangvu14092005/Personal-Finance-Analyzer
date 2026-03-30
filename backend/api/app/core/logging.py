@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from app.core.config import get_settings
 from app.middleware.request_context import get_request_id
-
 
 _LOG_RECORD_FACTORY_SET = False
 
@@ -16,7 +16,7 @@ def _set_log_record_factory() -> None:
 
     old_factory = logging.getLogRecordFactory()
 
-    def factory(*args, **kwargs):
+    def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
         record = old_factory(*args, **kwargs)
         if not hasattr(record, "request_id"):
             record.request_id = get_request_id()

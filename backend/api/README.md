@@ -46,3 +46,19 @@ If host-to-Docker PostgreSQL auth is blocked locally, run migration from a tempo
 ```bash
 docker run --rm --network pfa-local-network -v "${PWD}:/workspace" -w /workspace/backend/api python:3.12-slim sh -lc "pip install --no-cache-dir alembic sqlmodel 'psycopg[binary]' >/tmp/pip.log 2>&1 && DATABASE_URL='postgresql+psycopg://pfa:pfa@postgres:5432/pfa' alembic upgrade head"
 ```
+
+## Quality checks (Task 0.9)
+
+Install dev dependencies:
+
+```bash
+python -m uv sync --all-groups
+```
+
+Run lint, typecheck, tests:
+
+```bash
+python -m uv run ruff check app tests
+python -m uv run mypy app
+python -m uv run pytest
+```

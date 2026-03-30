@@ -4,7 +4,8 @@ import time
 from uuid import uuid4
 
 from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response
 from starlette.types import ASGIApp
 
 from app.core.config import get_settings
@@ -19,7 +20,11 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.settings = get_settings()
 
-    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
         request_id = request.headers.get(self.settings.request_id_header) or str(uuid4())
         set_request_id(request_id)
 
