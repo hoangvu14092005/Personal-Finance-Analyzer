@@ -606,3 +606,26 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Task 1.11: test pack auth flow đầy đủ.
 - Risks / Notes:
   - Dependency hiện verify access token trực tiếp từ cookie; khi thêm refresh-token flow cần mở rộng logic phân loại token type.
+
+### 2026-03-30 14:55 - phase-1 - Complete task 1.8 frontend auth pages
+- Goal:
+  - Hoàn thành task 1.8: tạo trang frontend `/login` và `/register` tích hợp API auth.
+- Files changed:
+  - frontend/web/lib/auth-api.ts
+  - frontend/web/app/login/page.tsx
+  - frontend/web/app/register/page.tsx
+  - frontend/web/app/layout.tsx
+  - progress_log.md
+- What was implemented:
+  - Tạo client API helper cho `register/login/logout/getMe` với `credentials: include`.
+  - Triển khai UI form login và register có loading/error state.
+  - Register gửi default profile (`currency`, `timezone`, `locale`) để khớp backend contract.
+  - Cập nhật navigation để truy cập nhanh login/register.
+- Validation:
+  - `pnpm lint` tại `frontend/web`: pass.
+  - `pnpm build` tại `frontend/web`: pass, route `/login` và `/register` build thành công.
+- Pending / Next:
+  - Task 1.9: protected routing cho dashboard pages.
+  - Task 1.10: onboarding/profile init refinement.
+- Risks / Notes:
+  - Auth cookie là HttpOnly nên frontend chỉ kiểm tra session qua API `GET /auth/me`, không đọc trực tiếp cookie bằng JS.

@@ -41,6 +41,12 @@ export default function RootLayout({
                 <Link href="/health" className="hover:text-slate-900">
                   Health
                 </Link>
+                <Link href="/login" className="hover:text-slate-900">
+                  Login
+                </Link>
+                <Link href="/register" className="hover:text-slate-900">
+                  Register
+                </Link>
               </nav>
             </div>
           </header>
