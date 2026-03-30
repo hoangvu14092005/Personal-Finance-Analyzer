@@ -629,3 +629,24 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Task 1.10: onboarding/profile init refinement.
 - Risks / Notes:
   - Auth cookie là HttpOnly nên frontend chỉ kiểm tra session qua API `GET /auth/me`, không đọc trực tiếp cookie bằng JS.
+
+### 2026-03-30 15:00 - phase-1 - Complete task 1.9 protected routing baseline
+- Goal:
+  - Hoàn thành task 1.9: protected routing cho dashboard khi chưa đăng nhập.
+- Files changed:
+  - frontend/web/app/dashboard/page.tsx
+  - frontend/web/app/layout.tsx
+  - progress_log.md
+- What was implemented:
+  - Tạo trang `/dashboard` dạng client-guard: gọi `getMe()` khi mount.
+  - Nếu API trả unauthorized thì tự động redirect về `/login`.
+  - Nếu authenticated thì hiển thị dashboard baseline + email user.
+  - Thêm nút logout gọi API `/auth/logout` rồi redirect về login.
+- Validation:
+  - `pnpm lint` tại `frontend/web`: pass.
+  - `pnpm build` tại `frontend/web`: pass, route `/dashboard` build thành công.
+- Pending / Next:
+  - Task 1.10: hoàn thiện onboarding profile init (currency/timezone/locale) trong flow auth.
+  - Task 1.11: tổng hợp test auth flow backend/frontend.
+- Risks / Notes:
+  - Guard hiện ở client runtime (không phải middleware server-side), nên lần render đầu có thể thấy trạng thái loading ngắn trước khi redirect.
