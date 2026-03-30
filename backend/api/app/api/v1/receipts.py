@@ -13,6 +13,7 @@ from app.dependencies.auth import get_current_user
 from app.integrations.storage import get_storage_service
 from app.models.entities import OcrResult, ReceiptUpload, User
 from app.schemas.receipts import OcrResultResponse, ReceiptStatusResponse, ReceiptUploadResponse
+from app.services.ocr_queue import enqueue_ocr_job
 from app.services.receipt_validation import validate_upload_file
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
@@ -66,6 +67,16 @@ def upload_receipt(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Upload failed",
         )
+
+    enqueued = enqueue_ocr_job(receipt.id)
+    if enqueued:
+        receipt.status = ReceiptStatus.PROCESSING.value
+    else:
+        receipt.error_code = "queue_unavailable"
+        receipt.error_message = "OCR queue is not available. You can retry later."
+    session.add(receipt)
+    session.commit()
+    session.refresh(receipt)
 
     return ReceiptUploadResponse(receipt_id=receipt.id, status=receipt.status)
 

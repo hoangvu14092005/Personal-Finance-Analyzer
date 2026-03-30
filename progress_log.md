@@ -810,3 +810,28 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Chốt wiring enqueue để đạt full async pipeline đúng exit criteria phase 2.
 - Risks / Notes:
   - Do producer TaskIQ chưa nối trực tiếp trong API, UI hiện có thể timeout sang fallback nếu worker không được trigger từ backend runtime.
+
+### 2026-03-30 16:18 - phase-2 - Wire OCR enqueue to TaskIQ producer
+- Goal:
+  - Hoàn thiện wiring enqueue OCR từ API sang worker queue để tiệm cận full async pipeline phase 2.
+- Files changed:
+  - backend/api/pyproject.toml
+  - backend/api/uv.lock
+  - backend/api/app/services/ocr_queue.py
+  - backend/api/app/api/v1/receipts.py
+  - progress_log.md
+- What was implemented:
+  - Thêm dependencies `taskiq` và `taskiq-redis` cho API producer side.
+  - Tạo `enqueue_ocr_job(receipt_id)` service (dynamic import worker task + `kiq` dispatch).
+  - Update upload endpoint:
+    - enqueue thành công -> chuyển status `processing`.
+    - enqueue lỗi -> giữ status hiện tại và ghi `error_code=queue_unavailable` để frontend fallback rõ ràng.
+- Validation:
+  - `uv sync --all-groups` trong `backend/api`: pass.
+  - `uv run ruff check app tests`: pass.
+  - `uv run mypy app`: pass.
+  - `uv run pytest tests/test_receipts_api.py`: pass.
+- Pending / Next:
+  - Chạy E2E thực tế với worker process đang chạy để xác thực đầy đủ transition `uploaded/processing/ready/failed`.
+- Risks / Notes:
+  - Producer hiện dùng dynamic import module worker theo local path để giữ kiến trúc monorepo đơn giản; về dài hạn nên refactor sang shared task contract package chính thức.
