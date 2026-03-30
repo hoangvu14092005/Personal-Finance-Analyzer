@@ -668,3 +668,20 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Sau khi pass phase 1 sẽ chuyển phase 2 receipts + OCR pipeline.
 - Risks / Notes:
   - Giá trị profile default hiện hardcode cho MVP Việt Nam; nếu mở rộng multi-region cần profile setup linh hoạt hơn.
+
+### 2026-03-30 15:10 - phase-1 - Complete task 1.11 auth flow test pack
+- Goal:
+  - Hoàn thành task 1.11: bổ sung test flow auth end-to-end cơ bản.
+- Files changed:
+  - backend/api/tests/test_auth_flow.py
+  - progress_log.md
+- What was implemented:
+  - Thêm integration test `register -> login -> me -> logout -> me(401)`.
+  - Dùng SQLite in-memory + dependency override để test nhanh, độc lập hạ tầng ngoài.
+- Validation:
+  - `uv run pytest tests/test_auth_flow.py`: pass.
+  - `uv run ruff check app tests`: pass.
+- Pending / Next:
+  - Bắt đầu phase 2 (receipt upload & OCR pipeline) từ task 2.1.
+- Risks / Notes:
+  - Frontend E2E cho auth chưa thêm Playwright trong phase này; hiện mới có backend integration tests + frontend build checks.
