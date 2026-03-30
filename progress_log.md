@@ -337,3 +337,33 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Task 0.9: quality baseline (ruff, mypy, pytest) và scripts check.
 - Risks / Notes:
   - Từ host Windows có hiện tượng auth mismatch khi kết nối `localhost:5432`; workaround đã dùng là chạy migration/seed trong container cùng network `pfa-local-network`.
+
+### 2026-03-30 13:10 - phase-0 - Complete task 0.8 config logging request id
+- Goal:
+  - Hoàn thành task 0.8: chuẩn hóa settings bằng Pydantic Settings, logging dùng chung và request correlation id cho API.
+- Files changed:
+  - backend/api/pyproject.toml
+  - backend/api/uv.lock
+  - backend/api/app/main.py
+  - backend/api/app/core/database.py
+  - backend/api/app/core/config.py
+  - backend/api/app/core/logging.py
+  - backend/api/app/middleware/__init__.py
+  - backend/api/app/middleware/request_context.py
+  - backend/api/app/middleware/request_id.py
+  - progress_log.md
+- What was implemented:
+  - Thêm `Settings` trong `app/core/config.py` với nguồn `.env`, chuẩn hóa `app_env`, `log_level`, `database_url`, `redis_url`, `request_id_header`.
+  - Refactor `app/core/database.py` để đọc `database_url` từ settings thay vì `os.getenv` rời rạc.
+  - Thêm `app/core/logging.py` với cấu hình log format có `request_id`, đồng thời inject `request_id` mặc định qua `LogRecordFactory` để tránh lỗi với logger ngoài (uvicorn).
+  - Thêm middleware `RequestIdMiddleware` ghi log `request.start/request.end`, đo `duration_ms` và trả header `X-Request-ID` về client.
+  - Gắn middleware + cấu hình logging vào `app/main.py`.
+- Validation:
+  - `d:/VuLapTrinh2/Personal_Finance_Analyzer/.venv/Scripts/python.exe -m uv sync --project backend/api`: pass.
+  - Chạy API tại port 8010 và gọi `GET /health` với header `X-Request-ID=phase08-final`: trả `200`, response header giữ đúng request id.
+  - Kiểm tra output server có log lifecycle kèm `request_id` và không còn lỗi `KeyError: request_id`.
+- Pending / Next:
+  - Task 0.9: thêm Ruff/mypy/pytest baseline và docs/scripts check.
+  - Task 0.10: frontend gọi backend health thật (online/offline).
+- Risks / Notes:
+  - Môi trường hiện vẫn xuất cảnh báo `VIRTUAL_ENV` khi dùng `uv --project`; không ảnh hưởng kết quả chạy nhưng cần đồng bộ cách dùng venv trong tài liệu kỹ thuật.

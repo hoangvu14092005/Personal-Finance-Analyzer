@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Generator
 
 from sqlmodel import Session, SQLModel, create_engine
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg://pfa:pfa@localhost:5432/pfa",
-)
+from app.core.config import get_settings
 
-engine = create_engine(DATABASE_URL, echo=False)
+settings = get_settings()
+engine = create_engine(settings.database_url, echo=False)
 
 
 def get_session() -> Generator[Session, None, None]:
