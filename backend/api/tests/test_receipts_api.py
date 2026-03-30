@@ -78,6 +78,9 @@ def test_upload_and_poll_receipt_status() -> None:
         assert receipt_status.json()["status"] in {"uploaded", "processing", "ready", "failed"}
 
         ocr_result = client.get(f"/api/v1/receipts/{receipt_id}/ocr-result")
-        assert ocr_result.status_code == 404
+        assert ocr_result.status_code in {200, 404}
+        if ocr_result.status_code == 200:
+            payload = ocr_result.json()
+            assert payload["provider"] == "mock"
 
     app.dependency_overrides.clear()

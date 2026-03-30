@@ -50,6 +50,9 @@ export default function RootLayout({
                 <Link href="/dashboard" className="hover:text-slate-900">
                   Dashboard
                 </Link>
+                <Link href="/receipts/upload" className="hover:text-slate-900">
+                  Upload
+                </Link>
               </nav>
             </div>
           </header>
