@@ -400,3 +400,24 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Task 0.11: thêm CI baseline để chạy checks tự động.
 - Risks / Notes:
   - Shell hiện dùng venv root nên `uv` vẫn cảnh báo lệch `VIRTUAL_ENV`; checks vẫn pass nhưng nên thống nhất cách activate venv theo từng project khi làm việc nhóm.
+
+### 2026-03-30 13:43 - phase-0 - Complete task 0.10 frontend health to backend
+- Goal:
+  - Hoàn thành task 0.10: frontend gọi backend `GET /health` thật và hiển thị online/offline.
+- Files changed:
+  - frontend/web/lib/config.ts
+  - frontend/web/app/health/page.tsx
+  - progress_log.md
+- What was implemented:
+  - Thêm `apiBaseUrl` config từ biến `NEXT_PUBLIC_API_BASE_URL` với fallback local.
+  - Refactor trang `/health` thành client component: tự động gọi `${apiBaseUrl}/health` khi mount.
+  - Hiển thị trạng thái `CHECKING/ONLINE/OFFLINE`, thông điệp phản hồi từ API, endpoint đang dùng và latency.
+  - Gửi kèm header `X-Request-ID` khi probe để đồng bộ với middleware correlation id phía backend.
+- Validation:
+  - `pnpm lint` tại `frontend/web`: pass.
+  - `pnpm build` tại `frontend/web`: pass, route `/health` build thành công.
+- Pending / Next:
+  - Task 0.11: thêm CI baseline cho frontend + backend checks.
+  - Sau khi xong phase 0 sẽ chuyển sang phase 1 (auth).
+- Risks / Notes:
+  - Build static của Next.js không đảm bảo backend runtime luôn online; trạng thái online/offline được quyết định tại runtime trên browser.
