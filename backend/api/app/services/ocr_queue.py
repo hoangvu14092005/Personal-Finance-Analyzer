@@ -1,38 +1,81 @@
-""" file này là cầu nối giữa phần backend chính và worker xử lý OCR, cho phép gửi job 
-OCR một cách bất đồng bộ mà không cần biết chi tiết về worker. """
+"""Service `ocr_queue` — producer phía API push OCR job vào TaskIQ Redis queue.
 
-import asyncio
-import os
-import sys
+Thiết kế:
+- Reuse cùng broker config (Redis URL) với worker thông qua `pfa_shared.config`.
+- Đăng ký một "proxy task" cùng tên với task của worker (`tasks:process_ocr_job`)
+  để API có thể dispatch qua kicker tiêu chuẩn của TaskIQ. Body của proxy task
+  chỉ raise vì execution thực do worker đảm nhiệm.
+- KHÔNG còn `sys.path.insert` (anti-pattern import worker code từ API).
+- Lỗi enqueue được log đầy đủ thay vì swallow im lặng.
+"""
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pfa_shared.config import CommonSettings
+from taskiq import AsyncBroker
+from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+
+from app.core.logging import get_logger
+
+logger = get_logger("api.ocr_queue")
+
+# Tên task phải khớp với task worker decorate trong `backend/worker/tasks.py`.
+# TaskIQ default task_name = f"{module_name}:{func_name}".
+OCR_TASK_NAME = "tasks:process_ocr_job"
 
 
-def enqueue_ocr_job(receipt_id: int) -> bool:
+@lru_cache(maxsize=1)
+def get_ocr_broker() -> AsyncBroker:
+    """Build broker singleton dùng cùng Redis với worker.
+
+    Đăng ký proxy task với cùng `task_name` như worker để API có thể dispatch
+    qua kicker tiêu chuẩn. Body chỉ raise vì execution thực do worker xử lý.
     """
-    Đẩy một job OCR vào hàng đợi xử lý bất đồng bộ.
+    settings = CommonSettings.from_env()
+    broker = ListQueueBroker(url=settings.redis_url).with_result_backend(
+        RedisAsyncResultBackend(redis_url=settings.redis_url),
+    )
 
-    Args:
-        receipt_id (int): ID của receipt cần xử lý OCR.
-
-    Returns:
-        bool: True nếu job được đẩy thành công, False nếu có lỗi.
-    """
-    try:
-        # Tìm đường dẫn thư mục worker (3 cấp trên so với file hiện tại)
-        worker_dir = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "../../..", "worker")
+    @broker.task(task_name=OCR_TASK_NAME)
+    async def _process_ocr_job_proxy(receipt_id: int) -> str:  # noqa: ARG001
+        raise NotImplementedError(
+            "process_ocr_job is consumed by the worker process, not the API",
         )
 
-        # Thêm worker_dir vào sys.path để có thể import module từ đó
-        if worker_dir not in sys.path:
-            sys.path.insert(0, worker_dir)
+    return broker
 
-        # Import task xử lý OCR từ module tasks trong worker.
-        # TODO(M3): refactor thành shared task contract package thay vì sys.path injection.
-        from tasks import process_ocr_job  # type: ignore[import-not-found]
 
-        # Đẩy job vào queue bằng cú pháp Taskiq (.kiq = "kick")
-        asyncio.run(process_ocr_job.kiq(receipt_id))
+async def enqueue_ocr_job(receipt_id: int) -> bool:
+    """Đẩy OCR job vào queue Redis cho worker xử lý.
 
-        return True
-    except Exception:
+    Returns:
+        True khi enqueue thành công.
+        False khi fail (đã log lỗi đầy đủ kèm `receipt_id` để truy vết).
+    """
+    broker = get_ocr_broker()
+    task = broker.find_task(OCR_TASK_NAME)
+    if task is None:
+        logger.error(
+            "ocr_queue.task_not_registered name=%s receipt_id=%s",
+            OCR_TASK_NAME,
+            receipt_id,
+        )
         return False
+
+    try:
+        await task.kiq(receipt_id)
+    except Exception:
+        logger.exception(
+            "ocr_queue.enqueue_failed receipt_id=%s task=%s",
+            receipt_id,
+            OCR_TASK_NAME,
+        )
+        return False
+
+    logger.info(
+        "ocr_queue.enqueue_success receipt_id=%s task=%s",
+        receipt_id,
+        OCR_TASK_NAME,
+    )
+    return True

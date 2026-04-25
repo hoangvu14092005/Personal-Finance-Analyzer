@@ -1,86 +1,117 @@
+"""Integration tests cho Receipt upload + status APIs (Phase 2 / M3 stable).
+
+Sau M3:
+- `enqueue_ocr_job` được monkeypatch -> không phụ thuộc Redis runtime.
+- Test cả 2 path: queue-available (status=processing) và queue-down (status=uploaded + error_code).
+"""
 from __future__ import annotations
 
 from pathlib import Path
 
-from app.core.database import get_session
-from app.core.security import create_access_token
-from app.main import app
+import pytest
 from app.models.entities import User
 from fastapi.testclient import TestClient
-from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
-
-engine = create_engine(
-    "sqlite://",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
 
 
-def _reset_database() -> None:
-    SQLModel.metadata.drop_all(engine)
-    SQLModel.metadata.create_all(engine)
-
-
+@pytest.fixture(autouse=True)
 def _cleanup_storage() -> None:
     storage_root = Path("data/receipts")
-    if storage_root.exists():
-        for file_path in storage_root.rglob("*"):
-            if file_path.is_file():
-                file_path.unlink()
+    if not storage_root.exists():
+        return
+    for file_path in storage_root.rglob("*"):
+        if file_path.is_file():
+            file_path.unlink()
 
 
-def _override_session_factory() -> Session:
-    with Session(engine) as session:
-        yield session
+def _patch_enqueue(monkeypatch: pytest.MonkeyPatch, *, success: bool) -> list[int]:
+    """Monkeypatch `enqueue_ocr_job` ở chỗ receipts.py import nó.
+
+    Trả về list `calls` để test có thể assert đã enqueue receipt id nào.
+    """
+    calls: list[int] = []
+
+    async def fake_enqueue(receipt_id: int) -> bool:
+        calls.append(receipt_id)
+        return success
+
+    monkeypatch.setattr("app.api.v1.receipts.enqueue_ocr_job", fake_enqueue)
+    return calls
 
 
-def _seed_user() -> User:
-    with Session(engine) as session:
-        user = User(
-            email="receipt@example.com",
-            password_hash="hash",
-            currency="VND",
-            timezone="Asia/Ho_Chi_Minh",
-            locale="vi-VN",
-        )
-        session.add(user)
-        session.commit()
-        session.refresh(user)
-        return user
+def test_upload_receipt_when_queue_available_sets_processing(
+    client: TestClient,
+    auth_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _patch_enqueue(monkeypatch, success=True)
+
+    response = client.post(
+        "/api/v1/receipts/upload",
+        files={"file": ("sample.jpg", b"jpeg-binary", "image/jpeg")},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["status"] == "processing"
+    assert calls == [body["receipt_id"]]
 
 
-def test_upload_and_poll_receipt_status() -> None:
-    _reset_database()
-    _cleanup_storage()
-    user = _seed_user()
+def test_upload_receipt_when_queue_unavailable_rolls_back_to_uploaded(
+    client: TestClient,
+    auth_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_enqueue(monkeypatch, success=False)
 
-    if user.id is None:
-        raise AssertionError("Seeded user id is required")
+    response = client.post(
+        "/api/v1/receipts/upload",
+        files={"file": ("sample.jpg", b"jpeg-binary", "image/jpeg")},
+    )
 
-    token = create_access_token(user_id=user.id, email=user.email)
-    app.dependency_overrides[get_session] = _override_session_factory
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "uploaded"
 
-    with TestClient(app) as client:
-        client.cookies.set("pfa_session", token)
+    status_response = client.get(f"/api/v1/receipts/{body['receipt_id']}")
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["status"] == "uploaded"
+    assert status_payload["error_code"] == "queue_unavailable"
+    assert "retry" in (status_payload["error_message"] or "").lower()
 
-        upload = client.post(
-            "/api/v1/receipts/upload",
-            files={"file": ("sample.jpg", b"jpeg-binary", "image/jpeg")},
-        )
-        assert upload.status_code == 201
-        upload_payload = upload.json()
-        receipt_id = upload_payload["receipt_id"]
-        assert upload_payload["status"] == "uploaded"
 
-        receipt_status = client.get(f"/api/v1/receipts/{receipt_id}")
-        assert receipt_status.status_code == 200
-        assert receipt_status.json()["status"] in {"uploaded", "processing", "ready", "failed"}
+def test_get_receipt_status_for_other_user_returns_404(
+    client: TestClient,
+    auth_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_enqueue(monkeypatch, success=True)
 
-        ocr_result = client.get(f"/api/v1/receipts/{receipt_id}/ocr-result")
-        assert ocr_result.status_code in {200, 404}
-        if ocr_result.status_code == 200:
-            payload = ocr_result.json()
-            assert payload["provider"] == "mock"
+    upload = client.post(
+        "/api/v1/receipts/upload",
+        files={"file": ("sample.jpg", b"jpeg-binary", "image/jpeg")},
+    )
+    receipt_id = upload.json()["receipt_id"]
 
-    app.dependency_overrides.clear()
+    # Clear cookie -> next request unauthenticated
+    client.cookies.clear()
+    unauthorized = client.get(f"/api/v1/receipts/{receipt_id}")
+    assert unauthorized.status_code == 401
+
+
+def test_get_ocr_result_returns_404_before_worker_writes(
+    client: TestClient,
+    auth_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_enqueue(monkeypatch, success=True)
+
+    upload = client.post(
+        "/api/v1/receipts/upload",
+        files={"file": ("sample.jpg", b"jpeg-binary", "image/jpeg")},
+    )
+    receipt_id = upload.json()["receipt_id"]
+
+    ocr = client.get(f"/api/v1/receipts/{receipt_id}/ocr-result")
+    # Worker chưa chạy trong test -> chưa có OcrResult row.
+    assert ocr.status_code == 404

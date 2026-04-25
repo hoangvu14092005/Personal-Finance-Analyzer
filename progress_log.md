@@ -895,3 +895,39 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - `category_suggestion.normalize_merchant_name` dùng `casefold()` để tra cuu deterministic; rule này cố ý đơn giản, có thể nâng cấp ở Phase 8 (merchant learning).
   - `ilike` của SQLAlchemy hoạt động trên cả PostgreSQL (native) và SQLite (qua collation in-memory), test pass trên SQLite in-memory.
   - Tests cũ vẫn tự tạo engine SQLite riêng — chưa migrate sang `client/auth_user` fixtures của conftest; sẽ làm ở M2 để tránh thay đổi diện rộng trong một PR.
+
+### 2026-04-25 22:30 - phase-2 - Milestone M3 Critical bug fixes Phase 2
+- Goal:
+  - Khắc phục các bug critical/code smell đã phát hiện trong audit Phase 2: anti-pattern import worker từ API qua `sys.path`, dead code `ocr_pipeline.py`, factory if-else vô nghĩa, race condition status `UPLOADED -> PROCESSING`, và silent error swallowing trong queue producer.
+- Files changed:
+  - backend/api/app/services/ocr_queue.py (refactored)
+  - backend/api/app/services/ocr_pipeline.py (deleted)
+  - backend/api/app/api/v1/receipts.py
+  - backend/api/app/integrations/storage/factory.py
+  - backend/api/app/integrations/ocr/factory.py
+  - backend/api/tests/test_receipts_api.py (rewritten)
+  - progress_log.md
+- What was implemented:
+  - **Bug #1 — `enqueue_ocr_job` anti-pattern (CRITICAL)**: thay thế `sys.path.insert(worker_dir)` + `from tasks import process_ocr_job` bằng pattern TaskIQ "proxy task". API và worker giờ share cùng `redis_url` (qua `pfa_shared.config.CommonSettings`) và cùng `task_name = "tasks:process_ocr_job"`. API đăng ký proxy task body raise `NotImplementedError` (chỉ để dispatch); worker giữ task implementation thật. Bỏ luôn `asyncio.run(...)` blocking — endpoint upload nay là `async def` nên `await task.kiq(...)` thẳng vào event loop hiện tại. `# type: ignore[import-not-found]` band-aid M1 đã được loại bỏ vì không còn import động nữa.
+  - **Bug #1.5 — Silent error swallowing**: thay `except Exception: return False` (không log) bằng `logger.exception(...)` với context đầy đủ (`receipt_id`, `task_name`). Thêm log `info` khi enqueue thành công để truy vết flow.
+  - **Bug #2 — Dead code `ocr_pipeline.py`**: file này (73 dòng) duplicate logic OCR với `worker/tasks.py` và không được import ở bất kỳ đâu (`grep` confirmed) → đã xóa hẳn. Source files mypy giảm từ 39 -> 38.
+  - **Bug #3 — Storage factory if-else vô nghĩa**: `factory.py` cũ có `if env in {local, test}: return LocalStorageService(...) else: return LocalStorageService(...)` (2 nhánh giống hệt). Đã đơn giản hóa thành 1 dòng return + tách `DEFAULT_LOCAL_STORAGE_ROOT` constant + docstring chỉ đường mở rộng S3/MinIO sau (Phase 5+).
+  - **Bug #4 — OCR factory if-else vô nghĩa**: `factory.py` cũ check `if ocr_provider == "mock"` rồi else cũng `MockOCRProvider`. Đã refactor sang `_PROVIDER_REGISTRY: dict[str, type[OCRProvider]]` để khi mở provider thật chỉ thêm entry vào registry, không sửa control flow.
+  - **Bug #5 — Race condition `UPLOADED -> PROCESSING` (CRITICAL)**: trước khi fix, API set `UPLOADED` -> enqueue -> set `PROCESSING`. Nếu worker chạy nhanh, có thể finish (`READY`) trước khi API kịp ghi `PROCESSING` -> API ghi đè `READY` thành `PROCESSING` -> frontend kẹt status processing vĩnh viễn. Sau fix: API set `PROCESSING` ngay khi tạo `ReceiptUpload` (trước enqueue). Nếu enqueue fail -> rollback về `UPLOADED` + `error_code="queue_unavailable"` + `error_message` cho frontend retry/fallback manual entry.
+  - **Bug #6 — Sync file read trong async path (bonus)**: đổi `file.file.read()` (blocking) thành `await file.read()` (FastAPI native async I/O) sau khi endpoint chuyển sang `async def`.
+  - **Test refactor**: `test_receipts_api.py` rewritten dùng `client`/`auth_user` fixtures từ `conftest.py`, monkeypatch `enqueue_ocr_job` thay vì phụ thuộc Redis runtime. Coverage tăng từ 1 test (kiểm tra status `in {uploaded, processing, ready, failed}` — quá lỏng) lên 4 test cụ thể: queue-available -> `processing`, queue-unavailable -> `uploaded` + `error_code=queue_unavailable`, unauthenticated 401, OCR result 404 trước khi worker write.
+- Validation:
+  - `python -m uv run ruff check app tests` (API): All checks passed!
+  - `python -m uv run mypy app` (API): Success: no issues found in 38 source files (giảm 1 vì xóa `ocr_pipeline.py`).
+  - `python -m uv run pytest -v` (API): 35 passed in 1.29s (32 cũ + 4 mới cho receipts thay 1 cũ).
+  - Tốc độ test giảm từ 5.88s -> 1.29s (~4.5x nhanh hơn) nhờ bỏ Redis dependency runtime (không còn `asyncio.run` block + Redis connection timeout trong test).
+  - Worker: ruff/mypy/pytest đều pass (2/2 tests, no regression).
+- Pending / Next:
+  - **M2** (đã pending từ M1): PUT/DELETE transactions + draft review payload + history page UI.
+  - **M5** (defer từ M3): worker migrate raw SQL -> SQLModel (cần share entities qua `pfa_shared` package); MinIO/S3 storage adapter; JWT secret fail-fast nếu chưa set; health check ping DB/Redis/MinIO thật.
+  - **M4**: UI cho draft review + manual entry + E2E test.
+- Risks / Notes:
+  - Pattern proxy task của TaskIQ yêu cầu API và worker khớp `task_name` chính xác (`"tasks:process_ocr_job"`). Nếu một bên đổi tên function hoặc đường dẫn module, dispatch sẽ silently fail (message gửi đi nhưng không ai consume). Đã thêm `OCR_TASK_NAME` constant + comment cảnh báo. Lý tưởng: tách shared task contract package (M5).
+  - `lru_cache(maxsize=1)` trên `get_ocr_broker()` đảm bảo broker singleton, nhưng cũng có nghĩa nếu test cần reset broker (đổi Redis URL chẳng hạn) phải gọi `get_ocr_broker.cache_clear()`. Hiện tests monkeypatch trực tiếp `enqueue_ocr_job` nên không chạm broker -> không vấn đề.
+  - `ListQueueBroker` của taskiq-redis lazy-connect Redis trên call đầu, không cần `await broker.startup()` trong FastAPI lifespan -> chấp nhận được cho MVP. Nếu cần graceful shutdown / connection pooling tốt hơn, refactor sang lifespan ở M5.
+  - File `data/receipts/*.jpg` test sinh ra được `_cleanup_storage` autouse fixture xóa giữa các test, không leak ra session khác.

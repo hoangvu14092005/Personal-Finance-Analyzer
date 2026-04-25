@@ -31,7 +31,7 @@ def _ensure_receipt_owner(
 
 
 @router.post("/upload", response_model=ReceiptUploadResponse, status_code=status.HTTP_201_CREATED)
-def upload_receipt(
+async def upload_receipt(
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
@@ -39,7 +39,7 @@ def upload_receipt(
     if current_user.id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
 
-    file_content = file.file.read()
+    file_content = await file.read()
     settings = get_settings()
     validate_upload_file(file, len(file_content), settings.ocr_max_file_size_mb)
 
@@ -50,13 +50,17 @@ def upload_receipt(
     storage = get_storage_service()
     stored_object = storage.upload_bytes(storage_key, file_content, file.content_type or "")
 
+    # Set PROCESSING TRƯỚC khi enqueue để tránh race condition:
+    # nếu set sau enqueue, worker có thể finish (READY) trước khi API kịp ghi
+    # PROCESSING -> API sẽ ghi đè READY thành PROCESSING -> frontend mãi thấy
+    # processing dù đã xong.
     receipt = ReceiptUpload(
         user_id=current_user.id,
         file_name=file.filename or generated_name,
         content_type=file.content_type or "application/octet-stream",
         file_size_bytes=stored_object.size_bytes,
         storage_key=stored_object.storage_key,
-        status=ReceiptStatus.UPLOADED.value,
+        status=ReceiptStatus.PROCESSING.value,
     )
     session.add(receipt)
     session.commit()
@@ -68,15 +72,17 @@ def upload_receipt(
             detail="Upload failed",
         )
 
-    enqueued = enqueue_ocr_job(receipt.id)
-    if enqueued:
-        receipt.status = ReceiptStatus.PROCESSING.value
-    else:
+    enqueued = await enqueue_ocr_job(receipt.id)
+    if not enqueued:
+        # Rollback: queue down -> trả về UPLOADED + error code để frontend
+        # có thể retry hoặc fallback sang manual entry. Không chuyển FAILED
+        # vì lỗi nằm ở queue, không phải OCR engine.
+        receipt.status = ReceiptStatus.UPLOADED.value
         receipt.error_code = "queue_unavailable"
         receipt.error_message = "OCR queue is not available. You can retry later."
-    session.add(receipt)
-    session.commit()
-    session.refresh(receipt)
+        session.add(receipt)
+        session.commit()
+        session.refresh(receipt)
 
     return ReceiptUploadResponse(receipt_id=receipt.id, status=receipt.status)
 
