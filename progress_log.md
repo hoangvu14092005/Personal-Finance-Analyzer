@@ -1088,3 +1088,90 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
 - Notes:
   - Local `pnpm build` trực tiếp không chạy được vì `pnpm` không có trong `PATH`; dùng `corepack pnpm build`.
   - Lần chạy build đầu trong sandbox bị `spawn EPERM`; rerun ngoài sandbox sau khi được approve thì pass.
+
+### 2026-04-26 02:30 - phase-3 - Milestone M5 Tech debt cleanup (JWT/lifespan/health/S3/SQLModel worker)
+- Goal:
+  - Đóng các technical debt deferred từ M3/M4: JWT secret fail-fast cho prod, FastAPI lifespan startup OCR broker, health check ping infra (DB/Redis/S3), MinIO/S3 storage adapter thật (boto3), worker raw SQL → SQLModel (qua `pfa_shared` mở rộng).
+  - Mục tiêu: chuẩn bị production-ready cho phase 4+ (dashboard analytics) — không có lỗi config silent, monitoring có hook đủ thông tin, storage scale ngoài local FS, worker dễ refactor cùng API.
+- Files changed:
+  - **Backend shared (mới mở rộng)**:
+    - `backend/shared/pyproject.toml` (thêm sqlmodel dep)
+    - `backend/shared/pfa_shared/entities.py` (mới — single source of truth cho SQLModel entities)
+    - `backend/shared/pfa_shared/storage/__init__.py` (mới)
+    - `backend/shared/pfa_shared/storage/base.py` (mới — `StorageService`/`StoredObject`/`StorageNotFoundError`/`StorageSettings` Protocol)
+    - `backend/shared/pfa_shared/storage/local.py` (mới — `LocalStorageService` với upload/download/delete)
+    - `backend/shared/pfa_shared/storage/s3.py` (mới — `S3StorageService` với boto3 lazy import)
+    - `backend/shared/pfa_shared/storage/factory.py` (mới — `build_storage_service(settings)` dispatch)
+    - `backend/shared/pfa_shared/config.py` (CommonSettings: thêm `database_url`, `storage_backend`, `storage_local_root`)
+  - **Backend API**:
+    - `backend/api/pyproject.toml` (thêm `boto3`, `redis`)
+    - `backend/api/app/core/config.py` (DEFAULT_JWT_SECRET, MIN_JWT_SECRET_LENGTH, `storage_backend`, `storage_local_root`, model_validator fail-fast)
+    - `backend/api/app/main.py` (lifespan startup/shutdown OCR broker)
+    - `backend/api/app/services/ocr_queue.py` (thêm `startup_ocr_broker` + `shutdown_ocr_broker`)
+    - `backend/api/app/services/health_checks.py` (mới — DB/Redis/S3 ping với asyncio.gather + timeout)
+    - `backend/api/app/schemas/health.py` (mới — `ComponentStatus` + `ReadinessResponse`)
+    - `backend/api/app/api/health.py` (3 endpoints: /health, /health/live, /health/ready)
+    - `backend/api/app/models/entities.py` (thin re-export từ `pfa_shared.entities`)
+    - `backend/api/app/integrations/storage/{base,local,s3,factory}.py` (re-export từ `pfa_shared.storage`)
+    - `backend/api/tests/conftest.py` (autouse fixtures: `_override_health_engine`, `_reset_storage_singleton`)
+    - `backend/api/tests/test_config_validation.py` (mới, 11 tests fail-fast validator)
+    - `backend/api/tests/test_health_endpoints.py` (mới, 5 tests live + ready + 503 + DB/Redis down)
+    - `backend/api/tests/test_storage.py` (mới, 11 tests Local + S3 mocked + factory dispatch)
+  - **Backend worker**:
+    - `backend/worker/pyproject.toml` (thêm `sqlmodel`, `boto3`)
+    - `backend/worker/ocr_provider.py` (refactor: `extract_text(content: bytes, source_hint: str)` thay `Path`)
+    - `backend/worker/tasks.py` (rewrite: SQLModel ORM + storage adapter + `run_ocr_for_receipt` testable function)
+    - `backend/worker/tests/test_ocr_provider.py` (update theo signature mới)
+    - `backend/worker/tests/test_run_ocr_for_receipt.py` (mới, 4 tests happy + idempotent + missing storage + missing receipt)
+  - `progress_log.md`
+- What was implemented:
+  - **JWT secret fail-fast** (M5.1):
+    - Tách `DEFAULT_JWT_SECRET` (placeholder cho local/test) thành module-level constant + `MIN_JWT_SECRET_LENGTH = 32`.
+    - `Settings._enforce_production_secrets` model_validator chạy sau field assignment: trong staging/prod, reject nếu `jwt_secret == DEFAULT_JWT_SECRET`, hoặc length < 32 chars, hoặc `storage_backend != "s3"`.
+    - Local/test giữ behavior cũ — không cần set env (dev khỏi cài config phức tạp).
+    - 11 unit tests cover happy + 3 error cases × 2 envs (staging/prod).
+  - **Lifespan broker** (M5.2):
+    - `app.services.ocr_queue.startup_ocr_broker()` + `shutdown_ocr_broker()` wrap `broker.startup/shutdown` với try/except → log warning thay vì crash khi Redis down.
+    - `@asynccontextmanager` lifespan trong `app/main.py` gọi 2 hàm trên ở enter/exit. TestClient with-statement trigger lifespan → tests vẫn pass dù Redis local không có.
+  - **Health check** (M5.3):
+    - Tách 3 endpoints: `/health` & `/health/live` (liveness — không phụ thuộc infra) và `/health/ready` (deep check).
+    - `run_readiness_checks(settings)` chạy 3 tasks song song qua `asyncio.gather`: DB (SELECT 1 wrap `asyncio.to_thread`), Redis (`redis.asyncio.Redis.ping()` cast Awaitable), S3 (`boto3.head_bucket` chỉ khi backend=s3).
+    - Mỗi check có timeout 2s + bắt mọi exception → trả `CheckResult(name, ok, error)`.
+    - Endpoint trả 200 nếu tất cả ok, 503 nếu có component down. Body luôn liệt kê components để monitoring biết cái nào hỏng.
+    - Test conftest dùng monkeypatch để inject test SQLite engine vào `health_checks.engine` (vì module-level binding).
+  - **MinIO/S3 storage adapter** (M5.4 + M5.5b):
+    - `S3StorageService` lazy import boto3/botocore trong constructor — package shared không declare boto3 dep, host package (API/worker) tự thêm.
+    - 3 ops: `upload_bytes` (PutObject + ContentType), `download_bytes` (GetObject + raise `StorageNotFoundError` cho NoSuchKey/404), `delete` (DeleteObject idempotent).
+    - Factory `build_storage_service(settings)` dispatch theo `settings.storage_backend` ("local" | "s3"); cả API + worker đều dùng cùng factory.
+    - Settings của API và CommonSettings của worker đều có cùng field names (`storage_backend`, `storage_local_root`, `s3_*`) — match `StorageSettings` Protocol.
+    - 11 unit tests: LocalStorage roundtrip + missing + delete idempotent; S3StorageService với boto3 mocked qua `sys.modules` patch.
+  - **Worker SQLModel + storage** (M5.5):
+    - Move `app/models/entities.py` → `pfa_shared/entities.py` (single source of truth). API có thin re-export để code cũ không phải đổi import path.
+    - Worker `tasks.py` rewrite hoàn toàn: bỏ `sqlalchemy.text()` raw SQL; dùng `Session.get(ReceiptUpload, id)`, `session.exec(select(...))`, `session.add()`. Logic upsert OcrResult dùng SELECT-then-UPDATE thay vì INSERT ON CONFLICT (chưa cần optimization).
+    - Tách core function `run_ocr_for_receipt(session, storage, provider, receipt_id)` để unit test với SQLite + LocalStorage tmp_path + MockOCRProvider — không cần Redis/MinIO/Postgres.
+    - `OCRProvider.extract_text` đổi signature từ `(file_path: Path)` → `(content: bytes, source_hint: str)` — provider không cần biết về storage backend.
+    - Worker dùng `build_storage_service(settings)` để download bytes từ local hoặc S3 theo `STORAGE_BACKEND` env var.
+- Validation:
+  - **API**: `ruff` clean, `mypy` 44 source files (39 → 44: +health/storage/config), `pytest -q` **87 passed** (60 → 87: +11 config + 5 health + 11 storage).
+  - **Worker**: `ruff` clean, `mypy` 7 source files (1 → 7: +tasks/run_ocr/test files), `pytest -q` **7 passed** (2 → 7: +5 OCR pipeline tests).
+  - **Frontend**: `pnpm lint` + `npx tsc --noEmit` đều clean (không đụng FE trong M5).
+  - **Total backend tests**: 60 → 94 (+34, tăng 57%) — coverage tăng cho config validation, health, storage, worker pipeline.
+- Pending / Next:
+  - **M6** (technical follow-up):
+    - Migration consolidation: hiện entities ở shared nhưng Alembic migrations vẫn ở `backend/api/alembic/`. Có thể giữ vậy (API là service "owner" schema), hoặc move sang shared nếu worker có schema riêng trong tương lai (vd. `task_results`, `dead_letters`).
+    - `mypy_boto3_s3` stubs: hiện dùng `# type: ignore[import-untyped]` cho boto3. Khi cần type strict, add `mypy-boto3-s3` to dev deps.
+    - S3 multipart upload: hiện `put_object` chỉ hỗ trợ file < 5GB; nếu phase 6+ scan bill bằng PDF nhiều trang thì cần multipart.
+  - **Phase 4**: Dashboard analytics (summary by category/period, charts, export CSV).
+  - **Phase 5**: Budgets per category per month, threshold alerts, AI insights.
+  - **Inline edit transaction**: vẫn defer; reuse review form components ở phase 4.
+- Risks / Notes:
+  - **`raising=False` còn sót trong test_storage.py (đã clean)**: monkeypatch `app.integrations.storage.s3.boto3` không còn áp dụng vì boto3 import trong `pfa_shared.storage.s3` (lazy). Test dùng `sys.modules` patch trực tiếp nên không cần raising=False — đã refactor.
+  - **`get_storage_service` lru_cache**: nếu test thay đổi `STORAGE_BACKEND` env, cache stale. Đã fix bằng autouse fixture `_reset_storage_singleton` clear cache mỗi test.
+  - **`get_settings` lru_cache**: tương tự, một số test thay env cần clear cache. Đã làm trong test_storage.py + test_config_validation.py thủ công.
+  - **Health check engine binding**: `app.services.health_checks` import `engine` từ `app.core.database` ở module load time → bind vào postgres URL từ settings ban đầu. Test conftest monkeypatch `health_checks.engine` → SQLite test engine. Production không bị ảnh hưởng (vẫn postgres).
+  - **Lifespan + Redis down**: nếu Redis chết khi API startup, `startup_ocr_broker` log warning và return False — app vẫn UP, nhưng `/health/ready` sẽ trả 503 + Redis "down". Endpoint upload sẽ rollback receipt sang UPLOADED + `error_code=queue_unavailable` → client biết retry. Đây là behavior đúng cho high-availability.
+  - **Worker raw SQL → SQLModel performance**: ORM ops chậm hơn raw SQL khoảng 10-20% với batch nhỏ. OCR job mỗi receipt 1 lần nên acceptable; nếu phase sau worker xử lý batch (vd. nightly aggregator) cần benchmark + dùng `bulk_insert_mappings` hoặc raw SQL có chủ ý.
+  - **SQLModel migration**: Alembic config ở API vẫn dùng `app.models.entities` (thin re-export). Khi generate revision mới, autogenerate sẽ thấy entities từ pfa_shared — đúng nhưng cần verify metadata không bị duplicate (chỉ có 1 metadata global của SQLModel).
+  - **boto3 dep size**: thêm boto3 vào API + worker tăng install size ~14MiB (botocore). Acceptable cho production; CI cache wheels nên không tăng build time đáng kể.
+  - **`ocr_provider.MockOCRProvider`**: hiện hardcoded amount/merchant. Khi tích hợp OCR provider thật (Vision API, Tesseract...), constructor + extract_text sẽ phức tạp hơn — đã chừa room cho strategy pattern.
+  - **JWT secret enforcement order**: model_validator chạy sau khi field assigned, nên không thể block app start khi env file đã set giá trị xấu — error rõ ràng ở `Settings()` constructor; FastAPI startup sẽ traceback lúc `get_settings()` được gọi đầu tiên. Đây là behavior fail-fast mong muốn (sớm hơn first request).

@@ -6,12 +6,14 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "alembic>=1.14.0,<2.0.0",
+  "boto3>=1.35.0,<2.0.0",
   "email-validator>=2.2.0,<3.0.0",
   "fastapi>=0.115.0,<1.0.0",
   "python-multipart>=0.0.20,<1.0.0",
   "pyjwt>=2.9.0,<3.0.0",
   "pwdlib[argon2]>=0.2.0,<1.0.0",
   "pydantic-settings>=2.6.0,<3.0.0",
+  "redis>=5.0.0,<8.0.0",
   "taskiq>=0.11.0,<1.0.0",
   "taskiq-redis>=1.0.0,<2.0.0",
   "personal-finance-analyzer-shared",

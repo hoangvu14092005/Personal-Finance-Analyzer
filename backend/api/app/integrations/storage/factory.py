@@ -1,20 +1,17 @@
 from __future__ import annotations
 
-from pathlib import Path
+from functools import lru_cache
 
-from app.integrations.storage.base import StorageService
-from app.integrations.storage.local import LocalStorageService
-
-# Storage root cho local/test backend; tách thành module-level constant để
-# có thể override khi test hoặc tune theo deployment.
-DEFAULT_LOCAL_STORAGE_ROOT = Path("data/receipts")
+from app.core.config import get_settings
+from pfa_shared.storage import StorageService, build_storage_service
 
 
+@lru_cache(maxsize=1)
 def get_storage_service() -> StorageService:
-    """Trả về implementation `StorageService`.
+    """Trả về implementation `StorageService` theo `settings.storage_backend`.
 
-    Hiện tại MVP chỉ có `LocalStorageService`. Khi mở MinIO/S3 (Phase 5+),
-    thêm nhánh dispatch theo `settings.app_env` hoặc cấu hình storage backend
-    riêng (`storage_backend = "local" | "s3"`) thay vì if-else trùng lặp.
+    Cache singleton qua `lru_cache`. Khi đổi settings trong test, gọi
+    `get_storage_service.cache_clear()` (xem conftest fixture
+    `_reset_storage_singleton`).
     """
-    return LocalStorageService(root_dir=DEFAULT_LOCAL_STORAGE_ROOT)
+    return build_storage_service(get_settings())

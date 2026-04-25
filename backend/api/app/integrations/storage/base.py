@@ -1,18 +1,13 @@
+"""Re-export storage primitives từ `pfa_shared.storage` (M5).
+
+Code API cũ import từ `app.integrations.storage.base` vẫn hoạt động.
+Nguồn duy nhất ở `backend/shared/pfa_shared/storage/base.py`."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol
+from pfa_shared.storage.base import (
+    StorageNotFoundError,
+    StorageService,
+    StoredObject,
+)
 
-
-@dataclass(frozen=True, slots=True)
-class StoredObject:
-    storage_key: str
-    size_bytes: int
-
-
-class StorageService(Protocol):
-    def upload_bytes(self, storage_key: str, content: bytes, content_type: str) -> StoredObject:
-        ...
-
-    def delete(self, storage_key: str) -> None:
-        ...
+__all__ = ["StorageNotFoundError", "StorageService", "StoredObject"]

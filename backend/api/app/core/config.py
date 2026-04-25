@@ -4,8 +4,13 @@ from functools import lru_cache  # cache kết quả để tránh đọc config 
 from typing import Literal
 
 from pfa_shared.enums import AppEnv
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Default placeholder JWT secret cho local/test. Settings validator sẽ reject
+# giá trị này khi `app_env` ∈ {staging, prod} để fail-fast (M5).
+DEFAULT_JWT_SECRET = "change-me-in-prod-please-use-at-least-32-chars"  # noqa: S105
+MIN_JWT_SECRET_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -28,17 +33,21 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0")
 
     s3_endpoint: str = "http://localhost:9000"  # MinIO endpoint (local)
-    s3_region: str = "us-east-1" 
+    s3_region: str = "us-east-1"
     s3_access_key: str = "minioadmin"
     s3_secret_key: str = "minioadmin"
     s3_bucket_private: str = "pfa-receipts"
+    # Storage backend: "local" dùng `LocalStorageService` (filesystem),
+    # "s3" dùng MinIO/S3 qua `S3StorageService`. Mặc định "local" cho dev.
+    storage_backend: Literal["local", "s3"] = "local"
+    storage_local_root: str = "data/receipts"
     ocr_provider: str = "mock"
     ocr_timeout_ms: int = 8000
     ocr_max_file_size_mb: int = 10
 
     request_id_header: str = "X-Request-ID"
 
-    jwt_secret: str = "change-me-in-prod-please-use-at-least-32-chars"
+    jwt_secret: str = DEFAULT_JWT_SECRET
     jwt_access_expire_minutes: int = 30
     jwt_refresh_expire_days: int = 7
     session_cookie_name: str = "pfa_session"
@@ -47,7 +56,7 @@ class Settings(BaseSettings):
     session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     cors_origins: list[str] = [
         "http://localhost:3000", # Frontend dev server
-        "http://127.0.0.1:3000", 
+        "http://127.0.0.1:3000",
     ]
 
     # CORS Origin: danh sách domain được phép gọi API từ trình duyệt.
@@ -71,6 +80,36 @@ class Settings(BaseSettings):
         # Fallback: nếu value không phải string hay list (ví dụ None hoặc kiểu không hợp lệ),
         # trả về danh sách mặc định cho môi trường local.
         return ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+    @model_validator(mode="after")
+    def _enforce_production_secrets(self) -> Settings:
+        """Fail-fast khi production secrets vẫn dùng giá trị placeholder.
+
+        - Local/Test: vẫn cho phép `DEFAULT_JWT_SECRET` để dev khỏi cần set env.
+        - Staging/Prod: bắt buộc `jwt_secret` phải khác default + đủ độ dài.
+        - Staging/Prod: storage_backend phải là "s3" (không cho phép local FS).
+        """
+        if self.app_env in {AppEnv.STAGING, AppEnv.PROD}:
+            if self.jwt_secret == DEFAULT_JWT_SECRET:
+                raise ValueError(
+                    "JWT_SECRET must be set to a non-default value in "
+                    f"{self.app_env.value} environment. "
+                    "Set the JWT_SECRET env var to a secure random string "
+                    f"(>= {MIN_JWT_SECRET_LENGTH} chars).",
+                )
+            if len(self.jwt_secret) < MIN_JWT_SECRET_LENGTH:
+                raise ValueError(
+                    f"JWT_SECRET must be at least {MIN_JWT_SECRET_LENGTH} "
+                    f"characters in {self.app_env.value} environment, "
+                    f"got {len(self.jwt_secret)} chars.",
+                )
+            if self.storage_backend != "s3":
+                raise ValueError(
+                    "STORAGE_BACKEND must be 's3' in "
+                    f"{self.app_env.value} environment "
+                    "(local filesystem storage is not supported).",
+                )
+        return self
 
 
 @lru_cache(maxsize=1)

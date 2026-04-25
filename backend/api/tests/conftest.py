@@ -38,6 +38,32 @@ def _reset_database(engine: Engine) -> Generator[None, None, None]:
     SQLModel.metadata.drop_all(engine)
 
 
+@pytest.fixture(autouse=True)
+def _override_health_engine(
+    engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Force health_checks.check_database dùng test SQLite engine.
+
+    `app.services.health_checks` import `engine` từ `app.core.database` ở
+    module load time → bound vào postgres engine production. Test override
+    bằng monkeypatch để `/health/ready` ping được test DB."""
+    monkeypatch.setattr("app.services.health_checks.engine", engine)
+
+
+@pytest.fixture(autouse=True)
+def _reset_storage_singleton() -> Generator[None, None, None]:
+    """Clear `get_storage_service` lru_cache giữa các test.
+
+    `get_storage_service` cache theo `settings.storage_backend` — test có
+    thể đổi setting → cần invalidate để pick up backend mới."""
+    from app.integrations.storage.factory import get_storage_service
+
+    get_storage_service.cache_clear()
+    yield
+    get_storage_service.cache_clear()
+
+
 @pytest.fixture
 def db_session(engine: Engine) -> Generator[Session, None, None]:
     with Session(engine) as session:

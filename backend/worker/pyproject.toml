@@ -5,9 +5,10 @@ description = "TaskIQ worker for Personal Finance Analyzer"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "boto3>=1.35.0,<2.0.0",
   "personal-finance-analyzer-shared",
   "psycopg[binary]>=3.2.0,<4.0.0",
-  "sqlalchemy>=2.0.0,<3.0.0",
+  "sqlmodel>=0.0.22,<1.0.0",
   "taskiq>=0.11.0,<1.0.0",
   "taskiq-redis>=1.0.0,<2.0.0",
 ]

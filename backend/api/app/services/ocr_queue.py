@@ -7,6 +7,8 @@ Thiết kế:
   chỉ raise vì execution thực do worker đảm nhiệm.
 - KHÔNG còn `sys.path.insert` (anti-pattern import worker code từ API).
 - Lỗi enqueue được log đầy đủ thay vì swallow im lặng.
+- M5: broker được startup/shutdown qua FastAPI lifespan thay vì lazy connect
+  ở lần enqueue đầu (xem `app/main.py`).
 """
 from __future__ import annotations
 
@@ -44,6 +46,36 @@ def get_ocr_broker() -> AsyncBroker:
         )
 
     return broker
+
+
+async def startup_ocr_broker() -> bool:
+    """Khởi tạo broker khi API startup (gọi từ FastAPI lifespan).
+
+    Returns:
+        True nếu startup thành công, False nếu broker không init được
+        (vd. Redis down). API vẫn chạy được — `enqueue_ocr_job` sẽ trả
+        False và endpoint upload sẽ rollback sang trạng thái UPLOADED
+        kèm `error_code=queue_unavailable`.
+    """
+    try:
+        broker = get_ocr_broker()
+        await broker.startup()
+    except Exception:
+        logger.exception("ocr_queue.startup_failed")
+        return False
+    logger.info("ocr_queue.startup_ok task=%s", OCR_TASK_NAME)
+    return True
+
+
+async def shutdown_ocr_broker() -> None:
+    """Đóng broker khi API shutdown (gọi từ FastAPI lifespan)."""
+    try:
+        broker = get_ocr_broker()
+        await broker.shutdown()
+    except Exception:
+        logger.exception("ocr_queue.shutdown_failed")
+    else:
+        logger.info("ocr_queue.shutdown_ok")
 
 
 async def enqueue_ocr_job(receipt_id: int) -> bool:

@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,13 +12,31 @@ from app.api.v1.transactions import router as transactions_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.middleware.request_id import RequestIdMiddleware
+from app.services.ocr_queue import shutdown_ocr_broker, startup_ocr_broker
 
 settings = get_settings()
 configure_logging()
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """FastAPI lifespan: khởi động OCR broker khi app start, đóng khi shutdown.
+
+    Khi Redis down, `startup_ocr_broker()` log warning và trả về False — app
+    vẫn chạy được; `enqueue_ocr_job` sẽ fail-soft → endpoint upload rollback
+    sang UPLOADED + error_code=queue_unavailable (xem `api/v1/receipts.py`).
+    """
+    await startup_ocr_broker()
+    try:
+        yield
+    finally:
+        await shutdown_ocr_broker()
+
+
 app = FastAPI(
     title="Personal Finance Analyzer API",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # CORS cho phép frontend từ domain khác gọi API.
