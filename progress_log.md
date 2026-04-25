@@ -1061,3 +1061,30 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - **TypeScript include `e2e/**/*.ts`**: tsconfig.json `include` mặc định `**/*.ts` → tsc check cả e2e. Lợi: catch type errors trong test sớm. Hại: nếu Next build accidentally bundle e2e files thì lỗi (chưa thấy vì e2e không nằm trong app/ nên Next không pick up). Có thể tách `tsconfig.e2e.json` extend ở phase sau nếu cần.
   - **React 19 `use(params)`** trong dynamic route client component: pattern mới của Next 15. Nếu downgrade sang Next 14, cần đổi sang sync access `params: { id: string }`. Đã document inline.
   - **Auth gate UX**: mỗi page protected gọi `getMe()` riêng → có thể delay vài chục ms render. Có thể optimize qua React Context provider ở phase sau, nhưng MVP chấp nhận được.
+
+## 2026-04-26 — Fix CI frontend build failures
+
+- Context:
+  - GitHub Actions job **Frontend checks** fail 2 lần liên tiếp:
+    - Lần 1 tại `actions/setup-node@v4`: `Unable to locate executable file: pnpm`.
+    - Lần 2 tại `pnpm build`: Next.js prerender fail route `/transactions` vì `useSearchParams()` thiếu Suspense boundary.
+- Files changed:
+  - `.github/workflows/ci.yml`
+  - `frontend/web/app/transactions/page.tsx`
+  - `frontend/web/app/transactions/transaction-history-client.tsx` (mới)
+- What was implemented:
+  - **CI pnpm setup order**:
+    - Đổi thứ tự frontend workflow để chạy `pnpm/action-setup@v4` trước `actions/setup-node@v4`.
+    - Giữ `cache: pnpm` + `cache-dependency-path: frontend/web/pnpm-lock.yaml`.
+    - Lý do: `setup-node` cần tìm được executable `pnpm` khi bật pnpm cache.
+  - **Next.js Suspense fix cho `/transactions`**:
+    - Tách logic client của transactions history sang `transaction-history-client.tsx`.
+    - `page.tsx` trở lại Server Component wrapper và bọc `<TransactionHistoryClient />` trong `<Suspense>`.
+    - Giữ nguyên behavior hiện có: auth gate, filter, delete, pagination, success banner từ `?created=N`.
+    - Lý do: Next.js 15 yêu cầu component dùng `useSearchParams()` phải nằm dưới Suspense boundary khi prerender/static build.
+- Validation:
+  - `corepack pnpm build` trong `frontend/web`: **passed**.
+  - Build output xác nhận `/transactions` prerender thành công và toàn bộ 12 static pages generated.
+- Notes:
+  - Local `pnpm build` trực tiếp không chạy được vì `pnpm` không có trong `PATH`; dùng `corepack pnpm build`.
+  - Lần chạy build đầu trong sandbox bị `spawn EPERM`; rerun ngoài sandbox sau khi được approve thì pass.
