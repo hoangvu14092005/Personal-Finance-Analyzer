@@ -56,6 +56,9 @@ export default function RootLayout({
                 <Link href="/transactions" className="hover:text-slate-900">
                   Transactions
                 </Link>
+                <Link href="/transactions/new" className="hover:text-slate-900">
+                  New Entry
+                </Link>
               </nav>
             </div>
           </header>

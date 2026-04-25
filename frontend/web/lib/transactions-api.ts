@@ -44,6 +44,16 @@ export type TransactionUpdatePayload = Partial<{
   note: string | null;
 }>;
 
+export type TransactionCreatePayload = {
+  amount: string;
+  currency: string;
+  transaction_date: string; // ISO YYYY-MM-DD
+  merchant_name?: string | null;
+  category_id?: number | null;
+  receipt_upload_id?: number | null;
+  note?: string | null;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
@@ -100,6 +110,15 @@ export async function listTransactions(
     `/api/v1/transactions${buildQuery(filters)}`,
     { method: "GET" },
   );
+}
+
+export async function createTransaction(
+  payload: TransactionCreatePayload,
+): Promise<Transaction> {
+  return request<Transaction>(`/api/v1/transactions`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function updateTransaction(

@@ -1,6 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { getMe } from "@/lib/auth-api";
@@ -46,6 +47,8 @@ function formatAmount(amount: string, currency: string): string {
 
 export default function TransactionHistoryPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const createdId = searchParams.get("created");
 
   const [authReady, setAuthReady] = useState(false);
   const [filters, setFilters] = useState<FilterFormState>(EMPTY_FILTERS);
@@ -57,7 +60,9 @@ export default function TransactionHistoryPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(
+    createdId ? `Đã lưu giao dịch #${createdId}.` : null,
+  );
 
   // Auth gate: redirect về login nếu chưa đăng nhập.
   useEffect(() => {
@@ -156,6 +161,20 @@ export default function TransactionHistoryPage() {
           <p className="text-sm text-slate-600">
             Xem, lọc và quản lý giao dịch đã lưu.
           </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/transactions/new"
+            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+          >
+            Nhập tay
+          </Link>
+          <Link
+            href="/receipts/upload"
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+          >
+            Upload hóa đơn
+          </Link>
         </div>
       </header>
 

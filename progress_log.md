@@ -976,3 +976,88 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - **Mapping persisted on update**: nếu user thay đổi `category_id` cho transaction cũ (đã sai từ trước), mapping cũ vẫn được giữ (chỉ thêm record mới). `remember_user_merchant_category()` upsert theo `normalized_merchant_name` -> ghi đè category mới. Đây là behaviour mong muốn: user fix sai 1 lần, các draft sau gợi ý đúng.
   - **DetachedInstanceError trong test**: pattern `_seed_*` helper return ORM instance + 2 commits → SQLAlchemy expire instance ở commit thứ 2. Đã fix bằng cách return primitive id (`int`) thay vì `Transaction` object. Helper với 1 commit (`_seed_transaction`, `_seed_user`, `_seed_category`) vẫn return ORM safely.
   - Frontend page chưa có inline edit (PUT) — chỉ delete. Edit sẽ làm ở M4 chung với draft review form (reuse cùng input components).
+
+### 2026-04-25 23:55 - phase-3 - Milestone M4 Review form UI + Manual entry + E2E
+- Goal:
+  - Hoàn tất Phase 3 (3.4 + 3.6 + 3.11): UI review form sau OCR, manual entry độc lập, và Playwright E2E suite. Đóng exit criteria phase 3 ("OCR draft review hoạt động, manual entry hoạt động, transaction CRUD ổn định").
+- Files changed:
+  - **Backend** (3 mới + 2 sửa):
+    - `app/schemas/categories.py` (mới)
+    - `app/api/v1/categories.py` (mới — endpoint `GET /categories`)
+    - `tests/test_categories_api.py` (mới, 6 tests)
+    - `app/schemas/__init__.py` (re-export `CategoryListResponse`, `CategoryResponse`)
+    - `app/main.py` (mount categories router)
+  - **Frontend** (4 page mới + 3 lib):
+    - `lib/categories-api.ts` (mới)
+    - `lib/receipts-api.ts` (mới)
+    - `lib/transactions-api.ts` (thêm `createTransaction` + `TransactionCreatePayload`)
+    - `app/receipts/[id]/review/page.tsx` (mới — Phase 3.4)
+    - `app/transactions/new/page.tsx` (mới — Phase 3.6)
+    - `app/receipts/upload/page.tsx` (refactor: auth gate + redirect sang review + dùng receipts-api)
+    - `app/transactions/page.tsx` (banner success từ `?created=N`, action buttons "Nhập tay" + "Upload hóa đơn")
+    - `app/layout.tsx` (thêm "New Entry" nav link)
+  - **E2E** (Playwright):
+    - `playwright.config.ts` (mới — webServer Next dev port 3100, baseURL configurable)
+    - `e2e/helpers.ts` (mới — `uniqueEmail`, `registerAndLogin`)
+    - `e2e/auth.spec.ts` (1 test smoke)
+    - `e2e/manual-entry.spec.ts` (2 tests)
+    - `e2e/receipt-review.spec.ts` (3 tests — dùng `page.route()` mock OCR draft)
+    - `e2e/transactions-history.spec.ts` (1 test filter + delete)
+    - `e2e/README.md` (hướng dẫn chạy)
+    - `package.json` (scripts `e2e`, `e2e:ui`; devDep `@playwright/test`)
+    - `.gitignore` (ignore `test-results/`, `playwright-report/`, `playwright/.cache/`)
+  - `progress_log.md`
+- What was implemented:
+  - **Backend `GET /api/v1/categories`**: trả combined `is_system=True` (seed mặc định 8 categories) + `user_id == current_user.id` (custom). Sort `is_system DESC` rồi `name ASC` để Food/Transport/... lên đầu, custom của user xuống dưới. Dùng `col(Category.is_system).is_(True)` (SQLModel column expression) thay vì `Category.is_system.is_(True)` để pass mypy. Validate auth → 401 nếu thiếu / token invalid.
+  - **Frontend `lib/categories-api.ts`**: typed helper `Category` + `listCategories()` đơn giản (không cần wrapper request<T> phức tạp vì chỉ 1 endpoint). Tách riêng để có thể swap impl độc lập.
+  - **Frontend `lib/receipts-api.ts`**: 4 helpers — `uploadReceipt()`, `getReceiptStatus()`, `getReceiptDraft()`, types `DraftReview`/`ReceiptStatus`/`ReceiptUploadResult`. `uploadReceipt` xử lý FormData không set Content-Type (browser tự thêm boundary). `jsonRequest<T>` shared cho status + draft với error message từ `body.detail`.
+  - **Phase 3.4 Review form page** (`app/receipts/[id]/review/page.tsx`):
+    - Dynamic route Next 15 — dùng React 19 `use(params)` unwrap Promise.
+    - Auth gate, parallel load `/draft` + `/categories` qua `Promise.all`.
+    - Pre-fill form từ `DraftReview` payload (merchant/amount/currency/date/category).
+    - **Low confidence highlight** (Phase 3.4 acceptance): nếu `confidence < 0.7`, hiện banner amber + tô viền amber các field nghi ngờ (merchant/amount/date).
+    - Suggested category dùng làm default selection cho dropdown.
+    - Form submit gọi `createTransaction()` với `receipt_upload_id` set → redirect `/transactions?created=N`.
+    - Fallback: nếu `/draft` 404 (OCR chưa xong) → block error với link sang `/transactions/new` cho user nhập tay.
+    - Toggle `<details>` xem raw OCR text để user verify khi nghi ngờ.
+  - **Phase 3.6 Manual entry page** (`app/transactions/new/page.tsx`):
+    - Form độc lập không cần receipt; default `transaction_date = hôm nay` (local timezone, không UTC để tránh lệch).
+    - Validation client-side: amount required + numeric > 0; date required.
+    - Reuse cùng pattern dropdown category như review form.
+    - Submit → redirect `/transactions?created=N`.
+  - **Refactor upload page** (`app/receipts/upload/page.tsx`):
+    - Auth gate redirect login.
+    - Bỏ JSON dump OCR, thay bằng redirect đến `/receipts/{id}/review` khi status `ready`.
+    - Polling 15 lần × 2s = 30s timeout; mỗi lần update message progress.
+    - Xử lý 3 case status sau upload: `ready` (redirect ngay), `uploaded` (queue down → fallback manual), `processing` (poll cho đến ready/failed).
+  - **Transactions list page enhancements**:
+    - Đọc `?created=N` từ `useSearchParams()` → seed banner "Đã lưu giao dịch #N" cho UX feedback sau khi tạo.
+    - Header thêm 2 action button: "Nhập tay" (emerald primary) + "Upload hóa đơn" (outline) cho quick navigation.
+  - **Playwright E2E suite** (Phase 3.11):
+    - Config tự start Next dev server port 3100 qua `webServer`; backend phải chạy riêng (port 8000).
+    - Helper `registerAndLogin()`: register → redirect login → login → redirect dashboard. Match label tiếng Việt không dấu của UI hiện tại ("Email", "Mat khau", "Ho va ten", "Tao tai khoan", "Dang nhap").
+    - Helper `uniqueEmail()`: timestamp + random suffix → tránh duplicate email khi DB persistent qua nhiều test run.
+    - **`receipt-review.spec.ts` mocking strategy**: dùng `page.route()` intercept `GET /api/v1/receipts/{id}/draft` trả mock payload, không cần worker + Redis chạy thật. Các endpoint khác (`/categories`, `POST /transactions`) đi backend thật → vẫn end-to-end ngoài 1 mock duy nhất.
+    - 7 tests across 4 specs: auth smoke, manual entry happy + validation, review pre-fill + low-confidence + 404 fallback, history filter + delete.
+- Validation:
+  - `python -m uv run ruff check app tests` (API): All checks passed!
+  - `python -m uv run mypy app` (API): Success: no issues found in 41 source files (39 → 41: +`categories.py` schema + endpoint).
+  - `python -m uv run pytest -q` (API): **60 passed** (54 → 60: +6 categories tests).
+  - `pnpm lint` (frontend): clean.
+  - `npx tsc --noEmit` (frontend): clean (bao phủ cả `e2e/`).
+  - `npx playwright test --list`: 7 tests discovered across 4 spec files, config valid.
+  - **Lưu ý**: chưa run `playwright test` thực tế vì backend không chạy lúc dev; user cần `docker compose up postgres redis` + `uvicorn app.main:app` trước khi `pnpm e2e`. Hướng dẫn chi tiết ở `frontend/web/e2e/README.md`.
+- Pending / Next:
+  - **M5** (defer kỹ thuật từ M3): worker raw SQL → SQLModel (cần `pfa_shared` mở rộng entities); MinIO/S3 storage adapter thật; JWT secret fail-fast khi env không set; health check ping DB/Redis/MinIO; FastAPI lifespan startup OCR broker.
+  - **Phase 4**: Dashboard analytics (summary by category/period, charts, export CSV).
+  - **Phase 5**: Budgets per category per month, threshold alerts.
+  - **Inline edit transaction** (defer từ M2): hiện chỉ delete trên `/transactions`. Cần modal hoặc page edit reuse review form components → không block phase 3 exit nhưng nên làm trước phase 4 để dashboard data đẹp hơn.
+- Risks / Notes:
+  - **E2E phụ thuộc DB persistent**: tests dùng `uniqueEmail()` để tránh collision, nhưng nếu chạy nhiều ngày liên tục DB sẽ tích lũy nhiều test users. Chấp nhận được cho dev; CI nên reset DB giữa runs (ví dụ `docker compose down -v` trước khi up).
+  - **OCR confidence threshold = 0.7 hardcoded**: ngưỡng highlight low-confidence cố định trong frontend. Có thể move sang backend response (server-side decide) ở phase 6 khi OCR provider thật trả confidence calibrated.
+  - **Categories endpoint chưa có pagination**: list system + user categories thường < 50 entries → query một phát là OK. Nếu user tạo nhiều custom categories trong phase 8, cần thêm pagination + search.
+  - **Manual entry default date timezone**: dùng `new Date()` local time + format YYYY-MM-DD → tránh lệch khi user ở UTC+7 click trước nửa đêm UTC. Nếu hỗ trợ nhiều timezone trong phase 7, cần config theo `user.timezone`.
+  - **Playwright `page.route()` mock chỉ cover `/draft`**: các test khác chạy backend thật. Trade-off: full E2E tốn infra, mock toàn bộ thì không phải E2E. Approach hiện tại cân bằng.
+  - **TypeScript include `e2e/**/*.ts`**: tsconfig.json `include` mặc định `**/*.ts` → tsc check cả e2e. Lợi: catch type errors trong test sớm. Hại: nếu Next build accidentally bundle e2e files thì lỗi (chưa thấy vì e2e không nằm trong app/ nên Next không pick up). Có thể tách `tsconfig.e2e.json` extend ở phase sau nếu cần.
+  - **React 19 `use(params)`** trong dynamic route client component: pattern mới của Next 15. Nếu downgrade sang Next 14, cần đổi sang sync access `params: { id: string }`. Đã document inline.
+  - **Auth gate UX**: mỗi page protected gọi `getMe()` riêng → có thể delay vài chục ms render. Có thể optimize qua React Context provider ở phase sau, nhưng MVP chấp nhận được.

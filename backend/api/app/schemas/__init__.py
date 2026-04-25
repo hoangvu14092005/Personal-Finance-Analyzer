@@ -1,4 +1,5 @@
 from app.schemas.auth import AuthResponse, LoginRequest, ProfileResponse, RegisterRequest
+from app.schemas.categories import CategoryListResponse, CategoryResponse
 from app.schemas.receipts import (
     DraftReviewResponse,
     OcrResultResponse,
@@ -15,6 +16,8 @@ from app.schemas.transactions import (
 
 __all__ = [
     "AuthResponse",
+    "CategoryListResponse",
+    "CategoryResponse",
     "DraftReviewResponse",
     "LoginRequest",
     "OcrResultResponse",
