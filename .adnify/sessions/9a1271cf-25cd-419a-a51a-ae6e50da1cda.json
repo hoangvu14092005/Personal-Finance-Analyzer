@@ -1,0 +1,37 @@
+{
+  "id": "9a1271cf-25cd-419a-a51a-ae6e50da1cda",
+  "createdAt": 1776999496386,
+  "lastModified": 1776999854774,
+  "contextItems": [],
+  "messageCheckpoints": [
+    {
+      "id": "ad608cc7-8d13-4c1c-8730-b92563492d22",
+      "messageId": "66ec3875-58bf-4743-b304-f01bb2b8ffc5",
+      "timestamp": 1776999496440,
+      "fileSnapshots": {},
+      "description": "Please explain the overall architecture and purpos",
+      "images": [],
+      "contextItems": []
+    },
+    {
+      "id": "8df90c89-5f39-4965-a993-e7742ca4b25b",
+      "messageId": "9acdb70c-5cc8-4f1f-98a9-2a41d8c5eab9",
+      "timestamp": 1776999536705,
+      "fileSnapshots": {},
+      "description": "Please explain the overall architecture and purpos",
+      "images": [],
+      "contextItems": []
+    },
+    {
+      "id": "a365c84e-d3f2-488f-beb9-9a073dd2e8b5",
+      "messageId": "a711b1ce-03bc-40b9-8229-976b1bd2ea87",
+      "timestamp": 1776999810968,
+      "fileSnapshots": {},
+      "description": "Hiện tại đang đến giai  đoạn nào",
+      "images": [],
+      "contextItems": []
+    }
+  ],
+  "messageCount": 14,
+  "contextSummary": null
+}

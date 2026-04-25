@@ -835,3 +835,63 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - Chạy E2E thực tế với worker process đang chạy để xác thực đầy đủ transition `uploaded/processing/ready/failed`.
 - Risks / Notes:
   - Producer hiện dùng dynamic import module worker theo local path để giữ kiến trúc monorepo đơn giản; về dài hạn nên refactor sang shared task contract package chính thức.
+
+### 2026-03-30 17:05 - phase-1 - Hotfix auth register CORS for frontend
+- Goal:
+  - Sửa lỗi frontend `/register` bị `Failed to fetch` do browser chặn CORS khi gọi API kèm cookie credentials.
+- Files changed:
+  - backend/api/app/core/config.py
+  - backend/api/app/main.py
+  - backend/api/.env.example
+  - progress_log.md
+- What was implemented:
+  - Bổ sung cấu hình `CORS_ORIGINS` trong settings API và parser để đọc từ env dạng CSV.
+  - Gắn `CORSMiddleware` vào app với `allow_credentials=True`, `allow_methods=["*"]`, `allow_headers=["*"]`.
+  - Cập nhật `.env.example` để có giá trị mặc định local cho `http://localhost:3000,http://127.0.0.1:3000`.
+- Validation:
+  - Chạy preflight `OPTIONS /api/v1/auth/register` với origin `http://localhost:3000`: trả `status=200`.
+  - Header xác nhận CORS đúng: `Access-Control-Allow-Origin=http://localhost:3000` và `Access-Control-Allow-Credentials=true`.
+  - Lint/typecheck backend sau patch: pass.
+- Pending / Next:
+  - Restart API process và verify lại flow đăng ký trực tiếp từ UI `/register`.
+  - Nếu còn lỗi, kiểm tra network tab để tách lỗi CORS với lỗi API payload/validation.
+- Risks / Notes:
+  - Với credentialed requests, không được dùng wildcard origin `*`; mỗi môi trường cần khai báo origin cụ thể trong `CORS_ORIGINS`.
+
+### 2026-04-25 21:50 - phase-3 - Milestone M1 Transaction baseline (3.1 + 3.3 + 3.5 + 3.9)
+- Goal:
+  - Mở Phase 3 với baseline transaction CRUD: schema typed, create endpoint với ownership guard, list endpoint với filter + pagination, kèm refactor test fixtures dùng chung.
+- Files changed:
+  - backend/api/app/schemas/transactions.py (new)
+  - backend/api/app/schemas/__init__.py
+  - backend/api/app/services/category_suggestion.py (new)
+  - backend/api/app/api/v1/transactions.py (new)
+  - backend/api/app/main.py
+  - backend/api/app/core/config.py
+  - backend/api/app/core/logging.py
+  - backend/api/app/services/ocr_queue.py
+  - backend/api/tests/conftest.py (new)
+  - backend/api/tests/test_transactions_api.py (new)
+  - progress_log.md
+- What was implemented:
+  - Phase 3.1: Pydantic schemas `TransactionCreate/Update/Response/ListResponse/ListMeta` với `extra="forbid"`, validate `amount > 0`, `currency` chuẩn hóa upper, trim merchant/note.
+  - Phase 3.3 baseline: service `category_suggestion` tra `UserMerchantMapping` theo `(user_id, normalized_merchant_name)`, helper `remember_user_merchant_category` để lưu mapping khi user xác nhận category.
+  - Phase 3.5: `POST /api/v1/transactions` cho phép tạo từ OCR draft hoặc manual entry, validate ownership của `receipt_upload_id` (404 nếu không phải owner), validate `category_id` thuộc user hoặc system (404 nếu private/khác user), tự suggest category từ merchant mapping khi user không truyền `category_id`, persist mapping khi user truyền cả `merchant_name + category_id`.
+  - Phase 3.9: `GET /api/v1/transactions` filter `start_date/end_date/category_id/merchant` (LIKE %case-insensitive%), pagination `page/size` với cap 100, sort default `transaction_date desc, id desc`, payload `items + meta(total/page/size)`, validate range `start_date <= end_date` trả 400.
+  - Refactor: `tests/conftest.py` gom fixtures (`engine`, `_reset_database` autouse, `db_session`, `client`, `auth_user`) — chuẩn bị nền tảng để các test sau dùng chung, giảm duplication.
+  - Lint hygiene: vén comment tiếng Việt vượt 100 ký tự ở `core/config.py`, `core/logging.py`, `main.py` để CI ruff sạch (không động logic).
+  - Mypy: thêm `# type: ignore[import-not-found]` cho `from tasks import process_ocr_job` trong `ocr_queue.py` kèm TODO(M3) để theo dõi refactor về shared task contract.
+- Validation:
+  - `python -m uv run ruff check app tests`: All checks passed!
+  - `python -m uv run mypy app`: Success: no issues found in 39 source files.
+  - `python -m uv run pytest`: 32 passed in 5.90s (17 cũ + 15 mới cho transactions).
+  - Test coverage cho transactions: tạo manual entry happy/zero-amount/unauthenticated/unowned receipt/unowned category/system category/merchant mapping persisted; list ownership isolation/sort desc/date range filter/category filter/merchant ilike/pagination 3 trang/range hợp lệ/size cap.
+- Pending / Next:
+  - M2: Phase 3.7 (PUT update) + 3.8 (DELETE) + 3.2 (draft review payload builder) + 3.10 (transaction history page UI).
+  - M3: Fix critical bugs Phase 2 (`enqueue_ocr_job` refactor, xóa `ocr_pipeline.py` dead code, factory always-mock).
+  - M4: Phase 3.4 (draft review form UI) + 3.6 (manual entry UI) + 3.11 (E2E test).
+- Risks / Notes:
+  - Hiện chỉ implement POST + GET; `PUT/DELETE` sẽ làm ở M2 để giữ scope M1 gọn và reviewable.
+  - `category_suggestion.normalize_merchant_name` dùng `casefold()` để tra cuu deterministic; rule này cố ý đơn giản, có thể nâng cấp ở Phase 8 (merchant learning).
+  - `ilike` của SQLAlchemy hoạt động trên cả PostgreSQL (native) và SQLite (qua collation in-memory), test pass trên SQLite in-memory.
+  - Tests cũ vẫn tự tạo engine SQLite riêng — chưa migrate sang `client/auth_user` fixtures của conftest; sẽ làm ở M2 để tránh thay đổi diện rộng trong một PR.

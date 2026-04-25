@@ -2,7 +2,7 @@
 
 Monorepo cho ung dung quan ly chi tieu ca nhan, gom frontend, backend API, worker va local infrastructure.
 
-## Repository Structure (Phase 0.1)
+## Repository Structure
 
 - `frontend/web`: Web app (Next.js)
 - `backend/api`: FastAPI service
@@ -18,9 +18,51 @@ Trang thai hien tai da chay duoc:
 - Backend API (FastAPI)
 - Worker (TaskIQ + Redis)
 - Local infra (PostgreSQL, Redis, MinIO)
+- Auth flow (register/login/logout/me)
+- Receipt upload flow + polling status + OCR mock baseline
 
-Chua hoan thanh:
-- Cac task tiep theo trong phase 0 (schema, quality baseline, CI)
+### One-shot (Copy 1 Block)
+
+Chay block sau trong PowerShell tai root repo `D:\VuLapTrinh2\Personal_Finance_Analyzer`.
+Block nay se:
+- up local infra (PostgreSQL, Redis, MinIO),
+- mo 3 terminal rieng cho API, worker, frontend,
+- in ra URL de check nhanh.
+
+```powershell
+Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer"
+
+# 1) Start infra
+Set-Location "infra\docker"
+docker compose up -d
+Set-Location "..\.."
+
+# 2) Start API in new terminal
+Start-Process powershell -ArgumentList @(
+	"-NoExit",
+	"-Command",
+	"Set-Location 'D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\api'; python -m uv sync --all-groups; python -m uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+)
+
+# 3) Start worker in new terminal
+Start-Process powershell -ArgumentList @(
+	"-NoExit",
+	"-Command",
+	"Set-Location 'D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker'; python -m uv sync --all-groups; python -m uv run taskiq worker --app-dir 'D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker' worker_app:broker"
+)
+
+# 4) Start frontend in new terminal
+Start-Process powershell -ArgumentList @(
+	"-NoExit",
+	"-Command",
+	"Set-Location 'D:\VuLapTrinh2\Personal_Finance_Analyzer\frontend\web'; pnpm install; pnpm dev"
+)
+
+Write-Host "Infra/API/Worker/Frontend are starting..."
+Write-Host "API health: http://127.0.0.1:8000/health"
+Write-Host "Frontend : http://localhost:3000"
+Write-Host "API docs : http://127.0.0.1:8000/docs"
+```
 
 ### 1) Prerequisites
 
@@ -28,6 +70,7 @@ Chua hoan thanh:
 - pnpm
 - Python 3.12+
 - uv (hoac su dung `python -m uv`)
+- Docker Desktop (hoac Docker daemon)
 
 ### 2) Run Backend API
 
@@ -35,7 +78,7 @@ PowerShell:
 
 ```powershell
 Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\api"
-python -m uv sync
+python -m uv sync --all-groups
 python -m uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -57,9 +100,9 @@ Expected:
 {"status":"ok","service":"api"}
 ```
 
-### 2.1) Run Local Infra (Task 0.6)
+### 2.1) Run Local Infra
 
-Luu y: can mo Docker Desktop (hoac Docker daemon) truoc khi chay `docker compose up -d`.
+Luu y: can mo Docker Desktop (hoac Docker daemon) truoc khi chay command.
 
 PowerShell:
 
@@ -106,22 +149,22 @@ pnpm dev
 Mo trinh duyet:
 - Frontend home: http://localhost:3000
 - Frontend health page: http://localhost:3000/health
+- Frontend login page: http://localhost:3000/login
+- Frontend register page: http://localhost:3000/register
+- Frontend dashboard (protected): http://localhost:3000/dashboard
+- Frontend receipt upload: http://localhost:3000/receipts/upload
 - Backend API docs: http://127.0.0.1:8000/docs
 
-### 4) Common Pitfall
-
-- Neu chay uvicorn trong `backend/api/app` voi `main:app` se de loi import.
-- Cach dung: chay tu `backend/api` voi `app.main:app` nhu lenh o tren.
-- Khong dung `uv run uvicorn main:app --reload` trong `backend/api/app`.
-
-### 5) Run Worker (Task 0.4)
+### 4) Run Worker
 
 Can Redis chay tai `localhost:6379`.
 
 PowerShell:
 
 ```powershell
-python -m uv run --project "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker" taskiq worker --app-dir "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker" worker_app:broker
+Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker"
+python -m uv sync --all-groups
+python -m uv run taskiq worker --app-dir "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker" worker_app:broker
 ```
 
 Mo terminal khac de ban demo task:
@@ -136,7 +179,46 @@ Expected output:
 ping
 ```
 
-### 6) Environment Files
+### 5) Test Commands
+
+#### Frontend
+
+```powershell
+Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\frontend\web"
+pnpm lint
+pnpm build
+```
+
+#### Backend API
+
+```powershell
+Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\api"
+python -m uv sync --all-groups
+python -m uv run ruff check app tests
+python -m uv run mypy app
+python -m uv run pytest
+```
+
+#### Backend Worker
+
+```powershell
+Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker"
+python -m uv sync --all-groups
+python -m uv run ruff check . tests
+python -m uv run mypy .
+python -m uv run pytest
+```
+
+### 6) Quick Manual Test (Auth + Receipt Upload)
+
+1. Start infra, API, frontend (va worker neu muon OCR queue consume).
+2. Mo `http://localhost:3000/register`, tao tai khoan moi.
+3. Dang nhap o `http://localhost:3000/login`.
+4. Vao `http://localhost:3000/receipts/upload`, upload file JPG/PNG/PDF.
+5. Xac nhan UI hien trang thai `uploading -> processing -> ready/failed`.
+6. Neu failed/timeout, kiem tra fallback manual-entry message tren UI.
+
+### 7) Environment Files
 
 Copy env examples thanh `.env` (neu can custom gia tri local):
 
@@ -144,24 +226,55 @@ Copy env examples thanh `.env` (neu can custom gia tri local):
 - `backend/api/.env.example`
 - `backend/worker/.env.example`
 
-## Local Run (Roadmap)
+### 8) Common Pitfall
 
-Phase 0 dang duoc thuc hien tung buoc. Luong chay local day du se hoan thien o cac task tiep theo:
+- Neu chay uvicorn trong `backend/api/app` voi `main:app` se de loi import.
+- Cach dung: chay tu `backend/api` voi `app.main:app` nhu lenh o tren.
+- Khong dung `uv run uvicorn main:app --reload` trong `backend/api/app`.
 
-1. `0.2`: Khoi tao frontend
-2. `0.3`: Khoi tao backend API
-3. `0.4`: Khoi tao worker
-4. `0.5`: Cau hinh shared Python package cho API/worker
-5. `0.6`: Cau hinh local infra (PostgreSQL, Redis, MinIO)
+### 9) Transaction APIs (Phase 3 baseline)
 
-Sau khi hoan thanh cac task tren, du an se ho tro chay local end-to-end.
+Sau khi dang nhap (cookie `pfa_session` da duoc set), co the goi:
+
+- `POST /api/v1/transactions` - tao transaction (manual entry hoac tu OCR draft).
+  Body toi thieu:
+
+  ```json
+  {
+    "amount": "125000.00",
+    "currency": "VND",
+    "transaction_date": "2026-04-01",
+    "merchant_name": "Pho 24",
+    "category_id": 3,
+    "note": "Lunch with team"
+  }
+  ```
+
+  Optional `receipt_upload_id` de link voi receipt da OCR; phai thuoc cung user.
+
+- `GET /api/v1/transactions` - list transaction co filter:
+
+  | Query param | Mo ta |
+  | --- | --- |
+  | `start_date` | ISO date, transaction tu ngay nay tro di |
+  | `end_date` | ISO date, transaction den het ngay nay |
+  | `category_id` | Loc theo category, > 0 |
+  | `merchant` | Substring match (case-insensitive) cho `merchant_name` |
+  | `page` | Default `1`, >= 1 |
+  | `size` | Default `20`, max `100` |
+
+  Response shape:
+
+  ```json
+  {
+    "items": [{ "id": 1, "amount": "125000.00", "...": "..." }],
+    "meta": { "total": 42, "page": 1, "size": 20 }
+  }
+  ```
 
 ## Current Status
 
-- [x] Phase 0.1: Tao boundary thu muc frontend/backend/worker
-- [x] Phase 0.2: Frontend skeleton (Next.js 15 + Tailwind + TypeScript)
-- [x] Phase 0.3: Backend API skeleton (FastAPI + uv + GET /health)
-- [x] Phase 0.4: Worker skeleton (TaskIQ + Redis + ping_task)
-- [x] Phase 0.5: Shared package skeleton (config/logging/enums/schemas/utils)
-- [x] Phase 0.6: Local infra skeleton (PostgreSQL + Redis + MinIO + init bucket + env examples)
-- [ ] Cac task con lai trong phase 0
+- [x] Phase 0: Foundation
+- [x] Phase 1: Auth and session
+- [x] Phase 2: Receipt upload and OCR pipeline baseline
+- [ ] Phase 3: Transactions and review (M1 done: schemas + create + list)

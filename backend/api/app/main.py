@@ -1,8 +1,10 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.receipts import router as receipts_router
+from app.api.v1.transactions import router as transactions_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.middleware.request_id import RequestIdMiddleware
@@ -15,7 +17,21 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# CORS cho phép frontend từ domain khác gọi API.
+# allow_origins: danh sách domain được phép gọi.
+# allow_methods: chấp nhận tất cả HTTP methods (GET, POST, PUT, DELETE, ...).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(RequestIdMiddleware)
 app.include_router(health_router)
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(receipts_router, prefix=settings.api_v1_prefix)
+app.include_router(transactions_router, prefix=settings.api_v1_prefix)
+
+# Request → CORSMiddleware → RequestIdMiddleware → Endpoint
+# Response ← CORSMiddleware ← RequestIdMiddleware ← Endpoint

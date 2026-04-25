@@ -1,0 +1,137 @@
+@startuml ERD - Personal Finance Assistant
+
+!define primary_key(x) <b><color:#b8861b><&key></color> x</b>
+!define foreign_key(x) <color:#aaaaaa><&key></color> x
+!define column(x) <color:#efefef><&media-record></color> x
+!define table(x) entity x << (T, white) >>
+
+' Styling
+skinparam linetype ortho
+skinparam roundcorner 5
+skinparam class {
+    BackgroundColor White
+    BorderColor #2C3E50
+    ArrowColor #34495E
+}
+
+' Users Table
+entity "users" as users {
+    primary_key(id): INTEGER
+    --
+    column(email): VARCHAR(255) <<unique>>
+    column(password_hash): VARCHAR(255)
+    column(full_name): VARCHAR(255)
+    column(currency): VARCHAR(10)
+    column(timezone): VARCHAR(64)
+    column(locale): VARCHAR(16)
+    column(is_active): BOOLEAN
+    column(created_at): TIMESTAMP
+}
+
+' Receipt Uploads Table
+entity "receipt_uploads" as receipt_uploads {
+    primary_key(id): INTEGER
+    --
+    foreign_key(user_id): INTEGER
+    column(file_name): VARCHAR(255)
+    column(content_type): VARCHAR(100)
+    column(file_size_bytes): INTEGER
+    column(storage_key): VARCHAR(500)
+    column(status): VARCHAR(50)
+    column(error_code): VARCHAR(100)
+    column(error_message): VARCHAR(500)
+    column(created_at): TIMESTAMP
+}
+
+' OCR Results Table
+entity "ocr_results" as ocr_results {
+    primary_key(id): INTEGER
+    --
+    foreign_key(receipt_upload_id): INTEGER <<unique>>
+    column(provider): VARCHAR(100)
+    column(raw_text): TEXT
+    column(confidence): FLOAT
+    column(normalized_payload): TEXT
+    column(status): VARCHAR(50)
+    column(created_at): TIMESTAMP
+}
+
+' Categories Table
+entity "categories" as categories {
+    primary_key(id): INTEGER
+    --
+    foreign_key(user_id): INTEGER
+    column(name): VARCHAR(100)
+    column(color): VARCHAR(20)
+    column(is_system): BOOLEAN
+    column(created_at): TIMESTAMP
+}
+
+' Transactions Table
+entity "transactions" as transactions {
+    primary_key(id): INTEGER
+    --
+    foreign_key(user_id): INTEGER
+    foreign_key(category_id): INTEGER
+    foreign_key(receipt_upload_id): INTEGER
+    column(merchant_name): VARCHAR(255)
+    column(amount): NUMERIC(12,2)
+    column(currency): VARCHAR(10)
+    column(transaction_date): DATE
+    column(note): VARCHAR(1000)
+    column(created_at): TIMESTAMP
+}
+
+' Budgets Table
+entity "budgets" as budgets {
+    primary_key(id): INTEGER
+    --
+    foreign_key(user_id): INTEGER
+    foreign_key(category_id): INTEGER
+    column(period_month): VARCHAR(7)
+    column(amount): NUMERIC(12,2)
+    column(created_at): TIMESTAMP
+}
+
+' Insight Snapshots Table
+entity "insight_snapshots" as insight_snapshots {
+    primary_key(id): INTEGER
+    --
+    foreign_key(user_id): INTEGER
+    column(range_start): DATE
+    column(range_end): DATE
+    column(insights_json): TEXT
+    column(recommendations_json): TEXT
+    column(alerts_json): TEXT
+    column(fingerprint): VARCHAR(128)
+    column(created_at): TIMESTAMP
+}
+
+' User Merchant Mappings Table
+entity "user_merchant_mappings" as user_merchant_mappings {
+    primary_key(id): INTEGER
+    --
+    foreign_key(user_id): INTEGER
+    foreign_key(category_id): INTEGER
+    column(raw_merchant_name): VARCHAR(255)
+    column(normalized_merchant_name): VARCHAR(255)
+    column(confidence): FLOAT
+    column(created_at): TIMESTAMP
+}
+
+' Relationships
+users ||--o{ receipt_uploads : "uploads"
+users ||--o{ categories : "creates"
+users ||--o{ transactions : "makes"
+users ||--o{ budgets : "sets"
+users ||--o{ insight_snapshots : "has"
+users ||--o{ user_merchant_mappings : "maps"
+
+receipt_uploads ||--|| ocr_results : "has"
+receipt_uploads ||--o{ transactions : "generates"
+
+categories ||--o{ transactions : "categorizes"
+categories ||--o{ budgets : "limits"
+categories ||--o{ user_merchant_mappings : "maps to"
+
+@enduml
