@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -33,3 +34,25 @@ class OcrResultResponse(BaseModel):
     raw_text: str | None
     confidence: float | None
     normalized_payload: str | None
+
+
+class DraftReviewResponse(BaseModel):
+    """Payload gộp cho trang OCR review (Phase 3.2).
+
+    Frontend dùng response này để render form review draft với mọi field
+    đã được parse sẵn (amount/currency/date/merchant) và category được suggest
+    từ lịch sử user. Confidence kèm theo để UI highlight field nghi ngờ.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    receipt_id: int
+    receipt_status: str
+    provider: str
+    confidence: float | None
+    merchant_name: str | None
+    transaction_date: date | None
+    amount: Decimal | None
+    currency: str | None
+    suggested_category_id: int | None
+    raw_text: str | None

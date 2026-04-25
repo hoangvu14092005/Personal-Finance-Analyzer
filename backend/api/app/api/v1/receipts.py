@@ -12,7 +12,13 @@ from app.core.database import get_session
 from app.dependencies.auth import get_current_user
 from app.integrations.storage import get_storage_service
 from app.models.entities import OcrResult, ReceiptUpload, User
-from app.schemas.receipts import OcrResultResponse, ReceiptStatusResponse, ReceiptUploadResponse
+from app.schemas.receipts import (
+    DraftReviewResponse,
+    OcrResultResponse,
+    ReceiptStatusResponse,
+    ReceiptUploadResponse,
+)
+from app.services.draft_review import build_draft_review
 from app.services.ocr_queue import enqueue_ocr_job
 from app.services.receipt_validation import validate_upload_file
 
@@ -131,4 +137,46 @@ def get_receipt_ocr_result(
         raw_text=ocr_result.raw_text,
         confidence=ocr_result.confidence,
         normalized_payload=ocr_result.normalized_payload,
+    )
+
+
+@router.get("/{receipt_id}/draft", response_model=DraftReviewResponse)
+def get_receipt_draft(
+    receipt_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> DraftReviewResponse:
+    """Trả về payload review draft cho frontend (Phase 3.2).
+
+    Frontend dùng response này render review form đã pre-fill amount/merchant/
+    date/currency từ OCR + suggested category từ user merchant mapping.
+    """
+    if current_user.id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+
+    receipt = _ensure_receipt_owner(session, receipt_id, current_user.id)
+    ocr_result = session.exec(
+        select(OcrResult).where(OcrResult.receipt_upload_id == receipt_id),
+    ).first()
+    if ocr_result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OCR result not ready")
+
+    draft = build_draft_review(
+        session=session,
+        receipt=receipt,
+        ocr_result=ocr_result,
+        user_id=current_user.id,
+    )
+
+    return DraftReviewResponse(
+        receipt_id=draft.receipt_id,
+        receipt_status=draft.receipt_status,
+        provider=draft.provider,
+        confidence=draft.confidence,
+        merchant_name=draft.merchant_name,
+        transaction_date=draft.transaction_date,
+        amount=draft.amount,
+        currency=draft.currency,
+        suggested_category_id=draft.suggested_category_id,
+        raw_text=draft.raw_text,
     )

@@ -931,3 +931,48 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - `lru_cache(maxsize=1)` trên `get_ocr_broker()` đảm bảo broker singleton, nhưng cũng có nghĩa nếu test cần reset broker (đổi Redis URL chẳng hạn) phải gọi `get_ocr_broker.cache_clear()`. Hiện tests monkeypatch trực tiếp `enqueue_ocr_job` nên không chạm broker -> không vấn đề.
   - `ListQueueBroker` của taskiq-redis lazy-connect Redis trên call đầu, không cần `await broker.startup()` trong FastAPI lifespan -> chấp nhận được cho MVP. Nếu cần graceful shutdown / connection pooling tốt hơn, refactor sang lifespan ở M5.
   - File `data/receipts/*.jpg` test sinh ra được `_cleanup_storage` autouse fixture xóa giữa các test, không leak ra session khác.
+
+### 2026-04-25 23:30 - phase-3 - Milestone M2 Transaction PUT/DELETE + Draft review + History UI
+- Goal:
+  - Hoàn thành các task Phase 3 còn pending sau M1: 3.2 (draft review payload), 3.7 (PUT transactions), 3.8 (DELETE transactions), 3.10 (history page UI). Mở đường cho M4 (review form UI + E2E).
+- Files changed:
+  - backend/api/app/schemas/receipts.py (added `DraftReviewResponse`)
+  - backend/api/app/schemas/__init__.py (re-export)
+  - backend/api/app/services/draft_review.py (new)
+  - backend/api/app/api/v1/receipts.py (added `GET /receipts/{id}/draft`)
+  - backend/api/app/api/v1/transactions.py (added PUT + DELETE + helper `_ensure_transaction_owner`)
+  - backend/api/tests/test_receipts_draft.py (new, 6 tests)
+  - backend/api/tests/test_transactions_update_delete.py (new, 13 tests)
+  - frontend/web/lib/transactions-api.ts (new)
+  - frontend/web/app/transactions/page.tsx (new)
+  - frontend/web/app/layout.tsx (added Transactions nav link)
+  - progress_log.md
+- What was implemented:
+  - **Phase 3.2 — Draft review payload**: `DraftReviewResponse` schema enrich từ `ReceiptUpload + OcrResult + suggested_category`. Service `app/services/draft_review.py` parse `OcrResult.normalized_payload` (JSON string từ worker) thành structured fields (`merchant_name`, `transaction_date: date`, `amount: Decimal`, `currency`). Helper `_safe_parse_*` defensive: invalid JSON / date / decimal -> log warning + trả None thay vì crash. Suggested category lấy từ `suggest_category_for_merchant()` đã có (M1). Endpoint `GET /api/v1/receipts/{receipt_id}/draft` validate ownership -> 404 nếu OcrResult chưa có (worker chưa chạy xong) -> 200 với enriched payload sẵn sàng cho frontend review form.
+  - **Phase 3.7 — PUT /transactions/{id}**: partial update qua `payload.model_dump(exclude_unset=True)`. Empty body -> trả state hiện tại (no-op idempotent). Validate (a) transaction ownership, (b) category accessible (system hoặc owned). Khi update cả `merchant_name` + `category_id` non-null, gọi `remember_user_merchant_category()` để mapping được học cho draft sau. Reject `extra` field (Pydantic `extra="forbid"`) → 422.
+  - **Phase 3.8 — DELETE /transactions/{id}**: hard delete (MVP chưa có audit trail / soft delete). Trả 204 No Content. Validate ownership trước khi delete (404 nếu không phải owner / không tồn tại). Không cascade delete `UserMerchantMapping` (mapping được giữ để học theo lịch sử user).
+  - **Helper `_ensure_transaction_owner`**: dùng chung cho cả PUT và DELETE để DRY. Pattern tương đương `_ensure_receipt_owner` trong `receipts.py` và `_ensure_category_accessible` trong `transactions.py`.
+  - **Frontend `lib/transactions-api.ts`**: typed API helper (`Transaction`, `TransactionListMeta`, `TransactionListResponse`, `TransactionListFilters`, `TransactionUpdatePayload`). `request<T>()` wrapper xử lý 204 (return undefined), JSON parse safe, error message từ `body.detail`. Functions: `listTransactions(filters)`, `updateTransaction(id, payload)`, `deleteTransaction(id)`. Giữ `amount` dạng string để tránh mất precision khi parse Number qua boundary JSON.
+  - **Frontend `/transactions` page (Phase 3.10)**: client component với auth gate (redirect `/login` nếu `getMe()` fail), filter form (start_date / end_date / merchant search), pagination (DEFAULT_PAGE_SIZE=20), table view với cột Date / Merchant / Amount / Note / Action, delete button có `window.confirm` modal, status banners (success / error), empty state khi không match filter, loading state. `formatAmount()` dùng `toLocaleString("vi-VN")` cho hiển thị số.
+  - **Navigation**: thêm `<Link href="/transactions">` vào header trong `app/layout.tsx`.
+- Validation:
+  - `python -m uv run ruff check app tests` (API): All checks passed!
+  - `python -m uv run mypy app` (API): Success: no issues found in 39 source files (38 + `draft_review.py` mới).
+  - `python -m uv run pytest -v` (API): **54 passed in 1.49s** (35 sau M3 + 6 draft + 13 update/delete = 54).
+  - `pnpm lint` (frontend): clean.
+  - `npx tsc --noEmit` (frontend): clean.
+  - Test coverage cụ thể:
+    - **Draft (6 tests)**: parsed payload với normalize merchant + currency uppercase; suggested category từ user mapping; invalid date/amount/null fields graceful (no crash); 404 khi OcrResult chưa có; 404 cho receipt khác user; 401 unauth.
+    - **Update (8 tests)**: partial update success; empty body no-op; not-owner 404; unauth 401; unowned category 404; system category accepted; merchant mapping persisted khi update cả merchant + category; reject zero amount + extra field 422.
+    - **Delete (4 tests)**: success 204 + row removed; double delete -> 404 lần 2; not-owner 404 + row preserved; unauth 401.
+- Pending / Next:
+  - **M4** (Phase 3.4 + 3.6 + 3.11): draft review form UI ở `/receipts/upload` flow chuyển sang trang review sau khi OCR ready (call `/draft` endpoint, render form pre-fill, POST `/transactions` để lưu); manual entry form độc lập; E2E test upload -> review -> save (Playwright hoặc cypress).
+  - **M5**: worker migrate raw SQL -> SQLModel (share entities qua `pfa_shared`); MinIO/S3 storage adapter thật; JWT secret fail-fast khi env chưa set; health check ping DB/Redis/MinIO; FastAPI lifespan startup broker.
+  - Phase 4+: dashboard analytics, budgets, insights, reports.
+- Risks / Notes:
+  - **Decimal precision boundary**: Pydantic Decimal serialize ra string trong JSON; FE giữ string `amount` để không mất precision. Nếu FE cần arithmetic, dùng `Number()` (đủ cho hiển thị). Khi gửi update payload, FE format thành string trước khi POST.
+  - **Hard delete impact**: DELETE xóa hẳn row; nếu user lỡ tay không khôi phục được. Frontend đã có `window.confirm` modal nhưng MVP chưa có trash bin / undo. Cân nhắc soft delete ở Phase 6 nếu user feedback cần.
+  - **Filter category UX**: page hiện chưa có dropdown category (cần endpoint `GET /categories` chưa làm — sẽ thêm khi build manual entry / draft review form ở M4). Hiện chỉ filter date + merchant.
+  - **Mapping persisted on update**: nếu user thay đổi `category_id` cho transaction cũ (đã sai từ trước), mapping cũ vẫn được giữ (chỉ thêm record mới). `remember_user_merchant_category()` upsert theo `normalized_merchant_name` -> ghi đè category mới. Đây là behaviour mong muốn: user fix sai 1 lần, các draft sau gợi ý đúng.
+  - **DetachedInstanceError trong test**: pattern `_seed_*` helper return ORM instance + 2 commits → SQLAlchemy expire instance ở commit thứ 2. Đã fix bằng cách return primitive id (`int`) thay vì `Transaction` object. Helper với 1 commit (`_seed_transaction`, `_seed_user`, `_seed_category`) vẫn return ORM safely.
+  - Frontend page chưa có inline edit (PUT) — chỉ delete. Edit sẽ làm ở M4 chung với draft review form (reuse cùng input components).

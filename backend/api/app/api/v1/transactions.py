@@ -1,14 +1,16 @@
-"""Transaction APIs (Phase 3.1 / 3.5 / 3.9 baseline).
+"""Transaction APIs (Phase 3.1 / 3.5 / 3.7 / 3.8 / 3.9).
 
 Endpoints:
 - POST   /api/v1/transactions          : tao transaction (manual entry hoac tu OCR draft)
 - GET    /api/v1/transactions          : list transaction co filter + pagination
+- PUT    /api/v1/transactions/{id}     : update transaction (partial fields)
+- DELETE /api/v1/transactions/{id}     : xoa transaction (hard delete)
 """
 from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlmodel import Session, col, func, select
 
 from app.core.database import get_session
@@ -19,6 +21,7 @@ from app.schemas.transactions import (
     TransactionListMeta,
     TransactionListResponse,
     TransactionResponse,
+    TransactionUpdate,
 )
 from app.services.category_suggestion import (
     remember_user_merchant_category,
@@ -64,6 +67,20 @@ def _ensure_receipt_owner(
             detail="Receipt not found",
         )
     return receipt
+
+
+def _ensure_transaction_owner(
+    session: Session,
+    transaction_id: int,
+    user_id: int,
+) -> Transaction:
+    transaction = session.get(Transaction, transaction_id)
+    if transaction is None or transaction.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Transaction not found",
+        )
+    return transaction
 
 
 def _ensure_category_accessible(
@@ -196,3 +213,84 @@ def list_transactions(
         items=[_to_response(row) for row in rows],
         meta=TransactionListMeta(total=int(total), page=page, size=size),
     )
+
+
+@router.put("/{transaction_id}", response_model=TransactionResponse)
+def update_transaction(
+    transaction_id: int,
+    payload: TransactionUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> TransactionResponse:
+    """Update transaction (Phase 3.7).
+
+    Sửa partial: chỉ field nào được set trong body mới ghi đè. Validate ownership
+    của cả transaction và category mới (nếu đổi). Khi đổi cả `merchant_name` +
+    `category_id` sang giá trị non-null, lưu mapping vào `UserMerchantMapping`
+    để các draft sau gợi ý đúng category.
+    """
+    if current_user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user",
+        )
+
+    transaction = _ensure_transaction_owner(session, transaction_id, current_user.id)
+
+    update_data = payload.model_dump(exclude_unset=True)
+    if not update_data:
+        # Body rỗng -> không có gì để update; trả về state hiện tại để client biết
+        # request đã được xử lý nhưng không thay đổi.
+        return _to_response(transaction)
+
+    if "category_id" in update_data and update_data["category_id"] is not None:
+        _ensure_category_accessible(
+            session,
+            update_data["category_id"],
+            current_user.id,
+        )
+
+    for field, value in update_data.items():
+        setattr(transaction, field, value)
+
+    session.add(transaction)
+    session.commit()
+    session.refresh(transaction)
+
+    if (
+        transaction.merchant_name
+        and transaction.category_id is not None
+        and ("merchant_name" in update_data or "category_id" in update_data)
+    ):
+        remember_user_merchant_category(
+            session=session,
+            user_id=current_user.id,
+            merchant_name=transaction.merchant_name,
+            category_id=transaction.category_id,
+        )
+
+    return _to_response(transaction)
+
+
+@router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_transaction(
+    transaction_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Hard-delete transaction (Phase 3.8).
+
+    Hard delete vì MVP chưa có audit trail / soft-delete; row xóa vĩnh viễn.
+    Dashboard summary tự cập nhật vì chỉ aggregate từ rows hiện tại.
+    """
+    if current_user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user",
+        )
+
+    transaction = _ensure_transaction_owner(session, transaction_id, current_user.id)
+    session.delete(transaction)
+    session.commit()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -53,6 +53,9 @@ export default function RootLayout({
                 <Link href="/receipts/upload" className="hover:text-slate-900">
                   Upload
                 </Link>
+                <Link href="/transactions" className="hover:text-slate-900">
+                  Transactions
+                </Link>
               </nav>
             </div>
           </header>
