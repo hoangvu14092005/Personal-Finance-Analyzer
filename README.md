@@ -14,12 +14,15 @@ Monorepo cho ung dung quan ly chi tieu ca nhan, gom frontend, backend API, worke
 ## Local Run (Current)
 
 Trang thai hien tai da chay duoc:
-- Frontend (Next.js)
+- Frontend (Next.js 15 + React 19 + Tailwind + Recharts)
 - Backend API (FastAPI)
 - Worker (TaskIQ + Redis)
 - Local infra (PostgreSQL, Redis, MinIO)
 - Auth flow (register/login/logout/me)
 - Receipt upload flow + polling status + OCR mock baseline
+- Receipt review form (low-confidence highlight + category suggestion)
+- Manual transaction entry + Transactions history (filter/pagination/delete)
+- Dashboard analytics (time presets, donut chart, previous-period compare)
 
 ### One-shot (Copy 1 Block)
 
@@ -153,6 +156,8 @@ Mo trinh duyet:
 - Frontend register page: http://localhost:3000/register
 - Frontend dashboard (protected): http://localhost:3000/dashboard
 - Frontend receipt upload: http://localhost:3000/receipts/upload
+- Frontend transactions history: http://localhost:3000/transactions
+- Frontend manual entry: http://localhost:3000/transactions/new
 - Backend API docs: http://127.0.0.1:8000/docs
 
 ### 4) Run Worker
@@ -187,6 +192,7 @@ ping
 Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\frontend\web"
 pnpm lint
 pnpm build
+pnpm e2e   # Playwright (can backend + infra up)
 ```
 
 #### Backend API
@@ -272,9 +278,54 @@ Sau khi dang nhap (cookie `pfa_session` da duoc set), co the goi:
   }
   ```
 
+- `PUT /api/v1/transactions/{id}` - update partial (chi cac field gui len). Bao ve ownership + category access; neu update merchant + category, service tu dong remember mapping cho lan OCR sau.
+- `DELETE /api/v1/transactions/{id}` - xoa transaction (return 204). Yeu cau ownership.
+
+### 10) Dashboard Analytics API (Phase 4)
+
+Sau khi dang nhap, goi:
+
+- `GET /api/v1/dashboard/summary` - tra tong hop chi tieu cho 1 khoang thoi gian + so sanh ky truoc.
+
+  Query params:
+
+  | Query param | Mo ta |
+  | --- | --- |
+  | `range` | Preset: `7d` \| `30d` (default) \| `this_month` \| `last_month` \| `custom` |
+  | `start_date` | ISO date, **bat buoc** khi `range=custom` |
+  | `end_date` | ISO date, **bat buoc** khi `range=custom` |
+  | `top_categories_limit` | Default `5`, max `20` |
+  | `recent_transactions_limit` | Default `5`, max `50` |
+
+  Response shape (rut gon):
+
+  ```json
+  {
+    "range": { "preset": "30d", "start": "2026-03-27", "end": "2026-04-25", "days": 30 },
+    "previous_range": { "preset": "30d", "start": "2026-02-25", "end": "2026-03-26", "days": 30 },
+    "current":  { "total_spend": "400000.00", "transaction_count": 5 },
+    "previous": { "total_spend": "165000.00", "transaction_count": 3 },
+    "delta_amount":  "235000.00",
+    "delta_percent": 142.42,
+    "top_categories": [
+      { "category_id": 1, "name": "An uong", "color": "#f59e0b", "total_amount": "185000.00", "transaction_count": 2, "percentage": 46.25 }
+    ],
+    "recent_transactions": [
+      { "id": 12, "merchant_name": "Pho 24", "amount": "65000.00", "currency": "VND", "transaction_date": "2026-04-13", "category_id": 1, "category_name": "An uong" }
+    ]
+  }
+  ```
+
+  - `delta_percent` la `null` khi `previous.total_spend = 0` (khong the chia 0; UI render "-").
+  - Giao dich khong co category gop vao nhom "Chua phan loai" trong `top_categories`.
+  - Status code: `200` khi success (ke ca empty), `400` neu preset/custom invalid, `401` chua auth, `422` khi limit vuot cap.
+
 ## Current Status
 
 - [x] Phase 0: Foundation
 - [x] Phase 1: Auth and session
 - [x] Phase 2: Receipt upload and OCR pipeline baseline
-- [ ] Phase 3: Transactions and review (M1 done: schemas + create + list)
+- [x] Phase 3: Transactions and review (manual entry + history + receipt review form)
+- [x] Phase 4: Dashboard analytics (date_ranges + analytics service + summary API + UI shell + chart + previous period compare)
+- [ ] Phase 5: Goals and budgets (planned)
+- [x] Milestone M5: Tech debt cleanup (JWT fail-fast, lifespan broker, deep health check, S3/MinIO storage, SQLModel worker)

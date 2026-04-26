@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from sqlmodel import Session, select
-
 from app.core.database import engine
 from app.models.entities import Category
+from sqlmodel import Session, select
 
 DEFAULT_CATEGORIES: tuple[str, ...] = (
     "Food",

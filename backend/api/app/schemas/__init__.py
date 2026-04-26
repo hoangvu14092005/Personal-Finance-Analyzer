@@ -1,5 +1,12 @@
 from app.schemas.auth import AuthResponse, LoginRequest, ProfileResponse, RegisterRequest
 from app.schemas.categories import CategoryListResponse, CategoryResponse
+from app.schemas.dashboard import (
+    CategoryBreakdownResponse,
+    DashboardSummaryResponse,
+    PeriodTotalsResponse,
+    RangeInfo,
+    RecentTransactionResponse,
+)
 from app.schemas.receipts import (
     DraftReviewResponse,
     OcrResultResponse,
@@ -16,14 +23,19 @@ from app.schemas.transactions import (
 
 __all__ = [
     "AuthResponse",
+    "CategoryBreakdownResponse",
     "CategoryListResponse",
     "CategoryResponse",
+    "DashboardSummaryResponse",
     "DraftReviewResponse",
     "LoginRequest",
     "OcrResultResponse",
+    "PeriodTotalsResponse",
     "ProfileResponse",
+    "RangeInfo",
     "ReceiptStatusResponse",
     "ReceiptUploadResponse",
+    "RecentTransactionResponse",
     "RegisterRequest",
     "TransactionCreate",
     "TransactionListMeta",

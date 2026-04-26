@@ -1175,3 +1175,52 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - **boto3 dep size**: thêm boto3 vào API + worker tăng install size ~14MiB (botocore). Acceptable cho production; CI cache wheels nên không tăng build time đáng kể.
   - **`ocr_provider.MockOCRProvider`**: hiện hardcoded amount/merchant. Khi tích hợp OCR provider thật (Vision API, Tesseract...), constructor + extract_text sẽ phức tạp hơn — đã chừa room cho strategy pattern.
   - **JWT secret enforcement order**: model_validator chạy sau khi field assigned, nên không thể block app start khi env file đã set giá trị xấu — error rõ ràng ở `Settings()` constructor; FastAPI startup sẽ traceback lúc `get_settings()` được gọi đầu tiên. Đây là behavior fail-fast mong muốn (sớm hơn first request).
+
+### 2026-04-26 21:30 - phase-4 - Dashboard analytics (date_ranges → API → UI + chart)
+- Goal: Implement Phase 4 (Dashboard & Analytics) end-to-end: backend date range helpers, analytics service layer, `/dashboard/summary` endpoint, frontend dashboard shell với time filter, donut chart, previous-period compare.
+- Files changed:
+  - **Backend API**:
+    - `backend/api/app/services/date_ranges.py` (mới — `RangePreset` StrEnum, `DateRange`, `resolve_range`, `previous_period`, `InvalidDateRangeError`)
+    - `backend/api/app/services/analytics.py` (mới — `compute_summary` + dataclasses `PeriodTotals`, `CategoryBreakdown`, `RecentTransactionItem`, `DashboardSummary`)
+    - `backend/api/app/api/v1/dashboard.py` (mới — `GET /dashboard/summary` với query params + 400/401/422 error handling)
+    - `backend/api/app/schemas/dashboard.py` (mới — Pydantic response schemas)
+    - `backend/api/app/schemas/__init__.py` (re-export dashboard schemas)
+    - `backend/api/app/main.py` (register `dashboard_router` dưới `/api/v1`)
+    - `backend/api/tests/test_date_ranges.py` (mới, 18 tests cho 5 presets + previous + edge cases)
+    - `backend/api/tests/test_analytics_service.py` (mới, 10 tests cho aggregation + ordering + isolation + empty)
+    - `backend/api/tests/test_dashboard_api.py` (mới, 14 tests integration: auth + presets + custom + aggregation + limit + empty)
+  - **Frontend web**:
+    - `frontend/web/lib/dashboard-api.ts` (mới — typed client `getDashboardSummary` + `RangePreset` constants + `RANGE_LABELS`)
+    - `frontend/web/app/dashboard/page.tsx` (rewrite — Suspense wrapper cho `useSearchParams`)
+    - `frontend/web/app/dashboard/dashboard-client.tsx` (mới — auth gate, filter tabs, summary cards, recent tx list, prev-period compare bars, loading/error/empty states)
+    - `frontend/web/app/dashboard/category-chart.tsx` (mới — recharts `<PieChart>` donut + custom legend)
+    - `frontend/web/package.json` (add `recharts@3.8.1`)
+    - `frontend/web/e2e/dashboard.spec.ts` (mới, 2 Playwright tests: empty + happy path)
+  - `progress_log.md`
+- What was implemented:
+  - **Backend 4.1 — Date range helpers**: 5 presets (7d/30d/this_month/last_month/custom), `previous_period` chuẩn hóa: 7d/30d/custom dùng cùng độ dài kết thúc trước `start`, this_month/last_month dùng full tháng trước. `InvalidDateRangeError` raise khi custom thiếu params hoặc start > end.
+  - **Backend 4.2 — Analytics service**: `compute_summary(session, user_id, current, previous, *, top_categories_limit, recent_transactions_limit)` chạy 4 queries: `SUM+COUNT` current, `SUM+COUNT` previous, `GROUP BY category ORDER BY SUM DESC LIMIT N` (current), `SELECT recent JOIN Category LIMIT N`. Giao dịch không có category gộp vào "Chưa phân loại". Percentage = amount/total*100 (skip 0/0). Delta percent = `None` khi previous=0 (UI render "—").
+  - **Backend 4.3 — Endpoint**: `GET /api/v1/dashboard/summary?range=7d|30d|this_month|last_month|custom&start_date=&end_date=&top_categories_limit=&recent_transactions_limit=`. Status: 200 happy (kể cả empty), 400 invalid preset / custom thiếu dates / start>end, 401 chưa auth, 422 limit vượt cap (FastAPI Query validation). Cap: top_categories=20, recent_transactions=50.
+  - **Frontend 4.4 — API client**: `dashboard-api.ts` với types match backend schema (Decimal as string giữ precision), `RANGE_PRESETS` const + helpers `isRangePreset`, `RANGE_LABELS` (vi-VN), `PREVIOUS_RANGE_LABELS`.
+  - **Frontend 4.5 + 4.9 — Dashboard shell**: Auth gate redirect `/login`, summary cards row (Tổng chi tiêu / Số giao dịch / So sánh kỳ trước), recent transactions list link `/transactions`, skeleton (animate-pulse) khi loading initial, banner đỏ + "Thử lại" khi error, empty state khi count=0 (CTA Manual entry / Upload).
+  - **Frontend 4.6 — Time filter**: Pill tabs (`<button>` với `aria-pressed`) cho 5 presets, click → `router.replace` sync URL (`?range=...&start_date=...&end_date=...`), khi `range=custom` show 2 `<input type="date">` + nút "Áp dụng". `useEffect` đồng bộ ngược URL → state khi back/forward.
+  - **Frontend 4.7 — Category chart**: Recharts `<PieChart>` donut (innerRadius 60, outerRadius 90), tooltip format VND, custom legend bên cạnh, fallback colors khi category không có color, center label "Tổng" + amount.
+  - **Frontend 4.8 — Previous period UI**: Comparison block với 2 bar (current dark slate / previous slate-400) chuẩn hóa theo max để cùng scale; delta line tô màu (rose=tăng/xấu, emerald=giảm/tốt) với arrow ↑/↓/→.
+  - **Frontend 4.10 — E2E**: Playwright test cho empty state + range switch URL sync, và happy path tạo transaction → verify cards/chart/recent render.
+- Validation:
+  - **Backend**: `pytest` 129 passed (18 date_ranges + 10 analytics + 14 dashboard API + 87 phase 1-3/M5). `mypy app` clean (48 files). `ruff check .` 22 errors còn lại ALL trong `alembic/versions/c9702a06526e_create_initial_schema.py` (pre-existing E501 từ Phase 0.7) — không phải Phase 4. UP042 mới (StrEnum) đã fix.
+  - **Frontend**: `pnpm lint` clean, `npx tsc --noEmit` clean, `pnpm build` thành công (`/dashboard` route 99.1 kB → First Load 217 kB do recharts; static prerender OK).
+  - **E2E**: spec mới chưa run (cần backend up). Lệnh chạy: `pnpm e2e -- dashboard.spec.ts`.
+- Pending / Next:
+  - **Phase 4.4 — Analytics refresh strategy**: hiện chưa có cache. Mỗi request tính lại từ DB. Khi user >100 hoặc dataset >10k rows nên thêm Redis cache với TTL 60s + invalidate khi POST/PUT/DELETE transaction. Có thể dùng TaskIQ enqueue lightweight refresh job thay vì sync compute trên hot path.
+  - **Phase 4 hardening**: chưa thêm filter theo category trên dashboard (chỉ filter theo time). Nếu cần "filter chi tiêu cho category X trong 30 ngày", thêm `category_id` query param vào endpoint.
+  - **Tech debt — alembic ruff**: 22 E501 trong migration `c9702a06526e_*` đã tồn tại từ Phase 0.7. Có thể fix bằng `[tool.ruff.lint.per-file-ignores] "alembic/versions/*" = ["E501"]` trong `pyproject.toml` (housekeeping ngoài Phase 4).
+  - **Phase 5**: Goals & Budgets, Recurring transactions, Notifications.
+- Risks / Notes:
+  - **Decimal precision**: backend trả `total_spend`/`amount` dưới dạng JSON number (Pydantic `Decimal`). Frontend coerce về `string` ở type level + `Number()` chỉ khi format display — tránh mất precision với amount > Number.MAX_SAFE_INTEGER.
+  - **Recharts bundle size**: thêm 99 kB cho `/dashboard` route. Acceptable vì là analytics-heavy page; charting library có lazy import option nếu sau này cần optimize First Paint.
+  - **Range custom UX**: khi user click tab "Tùy chỉnh" mà chưa nhập dates, fallback gọi API với 30 ngày gần nhất tạm thời (không spam 400). Khi user submit form dates → router.replace URL sync và refetch. Edge case: timezone client vs server — hiện dùng local date string YYYY-MM-DD ở cả 2 phía, có thể skew 1 ngày khi user ở timezone khác server. Acceptable cho MVP single-region (Asia/Ho_Chi_Minh).
+  - **GROUP BY category với null**: SQLite + PostgreSQL đều xử lý `category_id IS NULL` thành 1 group riêng. Code gộp thành nhóm "Chưa phân loại" — UI rõ ràng. Nếu sau này backend reject transaction không có category, có thể remove path null-handling.
+  - **Order recent transactions**: `ORDER BY transaction_date DESC, id DESC` — id desc làm tiebreaker đảm bảo deterministic khi 2 tx cùng ngày. Quan trọng cho E2E reproducibility.
+  - **Frontend useSearchParams + Suspense**: Next.js 15 yêu cầu wrap `useSearchParams()` trong `<Suspense>` cho prerender static. Đã follow đúng pattern (giống `/transactions`).
+
