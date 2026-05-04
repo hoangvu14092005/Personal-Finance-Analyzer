@@ -1,3 +1,13 @@
+"""Request ID middleware: tạo unique ID cho mỗi request để tracing.
+
+Flow:
+1. Check header "X-Request-ID" từ client (hoặc generate UUID4)
+2. Set vào ContextVar để accessible trong toàn bộ request lifecycle
+3. Log request start/end với duration
+4. Add "X-Request-ID" vào response header
+
+Purpose: Tracing requests qua logs, debugging distributed systems.
+"""
 from __future__ import annotations
 
 import time
@@ -16,6 +26,13 @@ logger = get_logger("api.request")
 
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
+    """Middleware tạo unique request ID và log request lifecycle.
+    
+    Logs:
+        request.start: method, path, request_id
+        request.end: method, path, status, duration_ms, request_id
+    """
+    
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
         self.settings = get_settings()
@@ -25,6 +42,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: RequestResponseEndpoint,
     ) -> Response:
+        # Generate hoặc reuse request_id từ client
         request_id = request.headers.get(self.settings.request_id_header) or str(uuid4())
         set_request_id(request_id)
 

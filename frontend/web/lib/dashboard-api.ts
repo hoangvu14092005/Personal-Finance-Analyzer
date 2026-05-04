@@ -1,4 +1,5 @@
 import { apiBaseUrl } from "@/lib/config";
+import type { BudgetUsage } from "@/lib/budgets-api";
 
 // Match `app.services.date_ranges.RangePreset` của backend.
 export const RANGE_PRESETS = [
@@ -52,6 +53,9 @@ export type DashboardSummary = {
   delta_percent: number | null; // null khi previous=0 (không thể tính %).
   top_categories: CategoryBreakdown[];
   recent_transactions: RecentTransaction[];
+  // Phase 5.4 — budget period + usages cho tháng này.
+  budget_period: string; // YYYY-MM
+  budgets_usage: BudgetUsage[];
 };
 
 export type DashboardSummaryParams = {

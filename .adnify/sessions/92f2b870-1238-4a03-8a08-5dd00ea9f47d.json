@@ -1,0 +1,19 @@
+{
+  "id": "92f2b870-1238-4a03-8a08-5dd00ea9f47d",
+  "createdAt": 1777355501035,
+  "lastModified": 1777355596415,
+  "contextItems": [],
+  "messageCheckpoints": [
+    {
+      "id": "1db08a1b-8532-4eab-b932-b0a9d0dcc8f6",
+      "messageId": "f997ff40-fa11-4c56-b8d6-f0e4d465f067",
+      "timestamp": 1777355504353,
+      "fileSnapshots": {},
+      "description": "Thực hiện phân tích toàn diện toàn bộ mã nguồn của",
+      "images": [],
+      "contextItems": []
+    }
+  ],
+  "messageCount": 30,
+  "contextSummary": null
+}

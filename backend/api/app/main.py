@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.budgets import router as budgets_router
 from app.api.v1.categories import router as categories_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.receipts import router as receipts_router
@@ -57,6 +58,7 @@ app.include_router(categories_router, prefix=settings.api_v1_prefix)
 app.include_router(receipts_router, prefix=settings.api_v1_prefix)
 app.include_router(transactions_router, prefix=settings.api_v1_prefix)
 app.include_router(dashboard_router, prefix=settings.api_v1_prefix)
+app.include_router(budgets_router, prefix=settings.api_v1_prefix)
 
 # Request → CORSMiddleware → RequestIdMiddleware → Endpoint
 # Response ← CORSMiddleware ← RequestIdMiddleware ← Endpoint

@@ -2,13 +2,14 @@
   "openFiles": [],
   "activeFile": null,
   "expandedFolders": [
-    "D:\\VuLapTrinh2\\Personal_Finance_Analyzer"
+    "D:\\VuLapTrinh2\\Personal_Finance_Analyzer",
+    "D:\\VuLapTrinh2\\Personal_Finance_Analyzer\\backend"
   ],
   "scrollPositions": {},
   "cursorPositions": {},
   "layout": {
     "sidebarWidth": 260,
-    "chatWidth": 577,
+    "chatWidth": 335,
     "terminalVisible": false,
     "terminalLayout": "tabs"
   }

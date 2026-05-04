@@ -1,12 +1,10 @@
 """OCR provider abstraction (M5 refactor).
 
-Trước M5: `extract_text(file_path: Path)` — bind chặt vào local FS, worker
-phải biết physical path. Sau M5: `extract_text(content: bytes, source_hint)`
-— provider chỉ thấy bytes, worker dùng storage adapter để download bytes
-từ local hoặc S3.
+M5 change: extract_text(content: bytes) thay vì extract_text(file_path: Path)
+→ Provider không biết storage backend (local/S3), chỉ nhận bytes.
 
-`source_hint` (optional) là filename hoặc storage_key gốc, dùng cho mock
-log và debugging — không phải để mở file.
+MockOCRProvider: Fake OCR cho development, trả fixed values.
+Production: GoogleVisionOCRProvider (chưa implement).
 """
 from __future__ import annotations
 
@@ -17,31 +15,42 @@ from typing import Protocol
 
 @dataclass(frozen=True, slots=True)
 class OCRRawResult:
-    provider: str
-    raw_text: str
-    confidence: float
+    """Raw OCR output từ provider."""
+    provider: str       # "mock" | "google"
+    raw_text: str       # Full text extracted
+    confidence: float   # 0.0 - 1.0
 
 
 @dataclass(frozen=True, slots=True)
 class OCRNormalizedReceipt:
+    """Normalized receipt data sau khi parse raw_text."""
     merchant: str
-    transaction_date: str
+    transaction_date: str  # ISO format "YYYY-MM-DD"
     total_amount: Decimal
     currency: str
 
 
 class OCRProvider(Protocol):
+    """Protocol cho OCR providers. Implement 2 methods này."""
+    
     def extract_text(self, content: bytes, source_hint: str = "") -> OCRRawResult:
+        """Extract text từ receipt image/PDF bytes.
+        
+        Args:
+            content: File bytes (JPG/PNG/PDF)
+            source_hint: Optional filename cho logging (không dùng để mở file)
+        """
         ...
 
     def normalize_receipt(self, raw: OCRRawResult) -> OCRNormalizedReceipt:
+        """Parse raw OCR text thành structured data."""
         ...
 
 
 class MockOCRProvider:
+    """Mock OCR provider cho development. Trả fixed fake data."""
+    
     def extract_text(self, content: bytes, source_hint: str = "") -> OCRRawResult:  # noqa: ARG002
-        # Mock: dùng source_hint làm tên file giả trong raw_text.
-        # `content` không được parse — chỉ lưu kích thước để verify đã đọc bytes.
         label = source_hint or f"<{len(content)} bytes>"
         return OCRRawResult(
             provider="mock",
@@ -59,4 +68,9 @@ class MockOCRProvider:
 
 
 def get_ocr_provider() -> OCRProvider:
+    """Factory function: trả OCR provider dựa trên env config.
+    
+    Hiện tại: chỉ có MockOCRProvider.
+    TODO: Add GoogleVisionOCRProvider khi có API key.
+    """
     return MockOCRProvider()

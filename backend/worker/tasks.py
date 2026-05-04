@@ -1,11 +1,15 @@
-"""TaskIQ worker tasks.
+"""TaskIQ worker tasks: ping_task và process_ocr_job.
 
 M5 refactor:
-- Bỏ raw SQL, dùng SQLModel ORM (cùng `pfa_shared.entities` với API).
-- Bỏ hardcoded `Path("data/receipts")`, dùng `pfa_shared.storage` adapter
-  (local hoặc S3 tùy `STORAGE_BACKEND` env var).
-- Tách core logic `run_ocr_for_receipt(session, storage, provider, receipt_id)`
-  để test có thể unit-test với SQLite + LocalStorage.
+- Dùng SQLModel ORM thay vì raw SQL
+- Dùng storage adapter (local/S3) thay vì hardcoded Path
+- Tách core logic `run_ocr_for_receipt()` để dễ unit test
+
+OCR Pipeline:
+1. Receipt uploaded → status=UPLOADED
+2. Worker nhận job → status=PROCESSING
+3. Download bytes từ storage → OCR extract → Parse
+4. Save OcrResult → status=READY (hoặc FAILED nếu lỗi)
 """
 from __future__ import annotations
 
@@ -26,11 +30,13 @@ from worker_app import broker, settings
 
 
 def build_ping_response() -> str:
+    """Helper cho ping_task test."""
     return "ping"
 
 
 @broker.task
 async def ping_task() -> str:
+    """Demo task để verify worker hoạt động."""
     return build_ping_response()
 
 
@@ -40,15 +46,23 @@ def run_ocr_for_receipt(
     provider: OCRProvider,
     receipt_id: int,
 ) -> str:
-    """Core logic của OCR job — testable không cần Redis/TaskIQ.
-
-    Returns one of: "missing_receipt", "ready", "failed".
+    """Core OCR logic - testable không cần Redis/TaskIQ.
+    
+    Flow:
+    1. Mark PROCESSING
+    2. Download bytes từ storage
+    3. OCR extract + normalize
+    4. Upsert OcrResult
+    5. Mark READY (hoặc FAILED nếu exception)
+    
+    Returns:
+        "missing_receipt" | "ready" | "failed"
     """
     receipt = session.get(ReceiptUpload, receipt_id)
     if receipt is None:
         return "missing_receipt"
 
-    # Bước 1: đánh dấu PROCESSING (idempotent — chạy lại task không sao).
+    # Step 1: Mark PROCESSING (idempotent)
     receipt.status = ReceiptStatus.PROCESSING.value
     receipt.error_code = None
     receipt.error_message = None
@@ -56,13 +70,13 @@ def run_ocr_for_receipt(
     session.commit()
 
     try:
-        # Bước 2: tải bytes từ storage (local FS hoặc S3).
+        # Step 2: Download bytes
         try:
             content = storage.download_bytes(receipt.storage_key)
         except StorageNotFoundError as exc:
             raise RuntimeError(f"storage_key missing: {receipt.storage_key}") from exc
 
-        # Bước 3: gọi OCR provider.
+        # Step 3: OCR
         raw_result = provider.extract_text(content, source_hint=receipt.storage_key)
         normalized = provider.normalize_receipt(raw_result)
 
@@ -73,7 +87,7 @@ def run_ocr_for_receipt(
             "currency": normalized.currency,
         }
 
-        # Bước 4: upsert OcrResult.
+        # Step 4: Upsert OcrResult
         existing = session.exec(
             select(OcrResult).where(OcrResult.receipt_upload_id == receipt_id),
         ).first()
@@ -99,7 +113,7 @@ def run_ocr_for_receipt(
             existing.status = ReceiptStatus.READY.value
             session.add(existing)
 
-        # Bước 5: đánh dấu receipt READY.
+        # Step 5: Mark READY
         receipt.status = ReceiptStatus.READY.value
         receipt.error_code = None
         receipt.error_message = None
@@ -108,7 +122,7 @@ def run_ocr_for_receipt(
         return "ready"
 
     except Exception as exc:
-        # Rollback bất kỳ pending change → ghi lại receipt với status FAILED.
+        # Rollback + mark FAILED
         session.rollback()
         receipt = session.get(ReceiptUpload, receipt_id)
         if receipt is not None:
@@ -122,9 +136,10 @@ def run_ocr_for_receipt(
 
 @broker.task
 async def process_ocr_job(receipt_id: int) -> str:
-    """TaskIQ entry point. Tạo engine + session + storage cho mỗi job (worker
-    là long-lived; engine pooled qua sqlmodel). Body delegate sang
-    `run_ocr_for_receipt` để dễ unit test."""
+    """TaskIQ entry point: tạo engine/session/storage rồi delegate.
+    
+    Worker là long-lived process, engine pooled qua SQLModel.
+    """
     engine = create_engine(settings.database_url)
     storage = build_storage_service(settings)
     provider = get_ocr_provider()

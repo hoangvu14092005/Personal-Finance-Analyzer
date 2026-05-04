@@ -1,4 +1,11 @@
 from app.schemas.auth import AuthResponse, LoginRequest, ProfileResponse, RegisterRequest
+from app.schemas.budgets import (
+    BudgetCreate,
+    BudgetListResponse,
+    BudgetResponse,
+    BudgetUpdate,
+    BudgetUsageResponse,
+)
 from app.schemas.categories import CategoryListResponse, CategoryResponse
 from app.schemas.dashboard import (
     CategoryBreakdownResponse,
@@ -23,6 +30,11 @@ from app.schemas.transactions import (
 
 __all__ = [
     "AuthResponse",
+    "BudgetCreate",
+    "BudgetListResponse",
+    "BudgetResponse",
+    "BudgetUpdate",
+    "BudgetUsageResponse",
     "CategoryBreakdownResponse",
     "CategoryListResponse",
     "CategoryResponse",

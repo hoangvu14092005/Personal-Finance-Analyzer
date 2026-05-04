@@ -1,3 +1,11 @@
+"""
+Shared configuration cho API và Worker services.
+
+Tại sao dùng dataclass thay vì Pydantic?
+- Lightweight: Không cần validation phức tạp
+- frozen=True: Immutable, thread-safe
+- slots=True: Tiết kiệm ~40% memory
+"""
 from __future__ import annotations
 
 import os
@@ -9,27 +17,40 @@ from pfa_shared.enums import AppEnv
 
 @dataclass(frozen=True, slots=True)
 class CommonSettings:
+    """Config chung cho API và Worker. Đọc từ environment variables."""
+    
     app_env: AppEnv
     log_level: str
     redis_url: str
     database_url: str
+    
+    # Storage: S3/MinIO hoặc local filesystem
     s3_endpoint: str
     s3_region: str
     s3_access_key: str
     s3_secret_key: str
     s3_bucket_private: str
-    storage_backend: Literal["local", "s3"]
+    storage_backend: Literal["local", "s3"]  # "local" cho dev, "s3" cho prod
     storage_local_root: str
+    
+    # OCR configuration
     ocr_provider: str
     ocr_timeout_ms: int
     ocr_max_file_size_mb: int
 
     @classmethod
     def from_env(cls) -> "CommonSettings":
+        """
+        Tạo settings từ environment variables.
+        Defaults phù hợp cho local dev (Docker Compose).
+        Production phải override qua env vars.
+        """
         env_value = os.getenv("APP_ENV", AppEnv.LOCAL.value)
         app_env = AppEnv.from_value(env_value)
+        
         backend_raw = os.getenv("STORAGE_BACKEND", "local").strip().lower()
         backend: Literal["local", "s3"] = "s3" if backend_raw == "s3" else "local"
+        
         return cls(
             app_env=app_env,
             log_level=os.getenv("LOG_LEVEL", "INFO"),

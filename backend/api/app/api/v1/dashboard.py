@@ -19,6 +19,7 @@ from sqlmodel import Session
 from app.core.database import get_session
 from app.dependencies.auth import get_current_user
 from app.models.entities import User
+from app.schemas.budgets import BudgetUsageResponse
 from app.schemas.dashboard import (
     CategoryBreakdownResponse,
     DashboardSummaryResponse,
@@ -31,6 +32,7 @@ from app.services.analytics import (
     DEFAULT_TOP_CATEGORIES_LIMIT,
     compute_summary,
 )
+from app.services.budgets import compute_budget_usage
 from app.services.date_ranges import (
     DateRange,
     InvalidDateRangeError,
@@ -137,6 +139,12 @@ def get_dashboard_summary(
         recent_transactions_limit=recent_transactions_limit,
     )
 
+    # Budget period: this_month/last_month → period đúng của range; còn lại
+    # (7d/30d/custom) → period chứa `range.end` (thường là hôm nay) để user
+    # thấy budget tháng hiện tại kể cả khi đang xem 7 ngày qua.
+    budget_period = _resolve_budget_period(current_range, preset)
+    budget_usages = compute_budget_usage(session, current_user.id, budget_period)
+
     return DashboardSummaryResponse(
         range=_build_range_info(current_range, preset),
         previous_range=_build_range_info(previous_range, preset),
@@ -173,4 +181,33 @@ def get_dashboard_summary(
             )
             for tx in summary.recent_transactions
         ],
+        budget_period=budget_period,
+        budgets_usage=[
+            BudgetUsageResponse(
+                budget_id=u.budget_id,
+                category_id=u.category_id,
+                category_name=u.category_name,
+                category_color=u.category_color,
+                period_month=u.period_month,
+                budget_amount=u.budget_amount,
+                spent_amount=u.spent_amount,
+                remaining_amount=u.remaining_amount,
+                percent_used=u.percent_used,
+                status=u.status,  # type: ignore[arg-type]
+            )
+            for u in budget_usages
+        ],
     )
+
+
+def _resolve_budget_period(range_: DateRange, preset: RangePreset) -> str:
+    """Chọn period_month cho budget usage dựa trên preset.
+
+    - `this_month`, `last_month`: period đúng bằng tháng của range (both
+      start.month và end.month giống nhau với 2 preset này).
+    - `7d`, `30d`, `custom`: dùng tháng của `range.end` — user thường xem
+      budget của tháng mới nhất trong range.
+    """
+    if preset in (RangePreset.THIS_MONTH, RangePreset.LAST_MONTH):
+        return f"{range_.start.year:04d}-{range_.start.month:02d}"
+    return f"{range_.end.year:04d}-{range_.end.month:02d}"

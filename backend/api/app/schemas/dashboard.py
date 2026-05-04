@@ -1,10 +1,12 @@
-"""Pydantic schemas cho Dashboard summary API (Phase 4.3)."""
+"""Pydantic schemas cho Dashboard summary API (Phase 4.3 + 5.4)."""
 from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.budgets import BudgetUsageResponse
 
 
 class RangeInfo(BaseModel):
@@ -62,6 +64,12 @@ class DashboardSummaryResponse(BaseModel):
     delta_percent: float | None
     top_categories: list[CategoryBreakdownResponse]
     recent_transactions: list[RecentTransactionResponse]
+    # Period dùng để tính budget usage. Format "YYYY-MM". Chọn theo logic:
+    # - this_month/last_month: period đúng bằng tháng của range.
+    # - 7d/30d/custom: period = tháng chứa range.end (thường là hôm nay).
+    budget_period: str
+    # Budget usage cho `budget_period`. Empty nếu user chưa set budget trong tháng.
+    budgets_usage: list[BudgetUsageResponse] = Field(default_factory=list)
 
 
 __all__ = [

@@ -1224,3 +1224,50 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - **Order recent transactions**: `ORDER BY transaction_date DESC, id DESC` — id desc làm tiebreaker đảm bảo deterministic khi 2 tx cùng ngày. Quan trọng cho E2E reproducibility.
   - **Frontend useSearchParams + Suspense**: Next.js 15 yêu cầu wrap `useSearchParams()` trong `<Suspense>` cho prerender static. Đã follow đúng pattern (giống `/transactions`).
 
+### 2026-05-04 01:10 - phase-5 - Budgets CRUD + usage tracking + dashboard integration
+- Goal: Hoàn thành Phase 5 (Budgets) end-to-end: backend model constraint + migration, schemas/service/router CRUD, usage calculation với status thresholds, dashboard integration, frontend `/budgets` page + budget cards trên dashboard.
+- Files changed:
+  - **Backend API**:
+    - `backend/api/alembic/versions/a4b7c8d9e123_budgets_unique_updated_at.py` (mới — add `updated_at` column + unique constraint `(user_id, category_id, period_month)`)
+    - `backend/api/app/schemas/budgets.py` (mới — `BudgetCreate/Update/Response/ListResponse/UsageResponse` + `_validate_period_month` regex YYYY-MM)
+    - `backend/api/app/schemas/__init__.py` (re-export budget schemas)
+    - `backend/api/app/schemas/dashboard.py` (thêm `budget_period: str` + `budgets_usage: list[BudgetUsageResponse]`)
+    - `backend/api/app/services/budgets.py` (mới — CRUD + `compute_budget_usage`, `_parse_period_month` dùng `calendar.monthrange`, `_compute_status` thresholds safe/warning/exceeded, error types `BudgetAlreadyExistsError`/`BudgetNotFoundError`)
+    - `backend/api/app/api/v1/budgets.py` (mới — POST/GET/PUT/DELETE `/api/v1/budgets` + GET `/api/v1/budgets/usage`, ownership checks, 409 duplicate, 404 not-found/cross-user)
+    - `backend/api/app/api/v1/dashboard.py` (wire `compute_budget_usage` vào `/dashboard/summary`, helper `_resolve_budget_period` chọn period theo preset)
+    - `backend/api/app/main.py` (register `budgets_router`)
+    - `backend/api/tests/test_budgets_service.py` (mới, 17 tests — month parsing leap year/boundaries, status thresholds, CRUD, user isolation, usage computation outside-range guard)
+    - `backend/api/tests/test_budgets_api.py` (mới, 19 tests — auth gate, CRUD happy/validation, usage endpoint, dashboard integration)
+  - **Frontend web**:
+    - `frontend/web/lib/budgets-api.ts` (mới — typed client `listBudgets/createBudget/updateBudget/deleteBudget/getBudgetUsage`, `BudgetUsage` type với `BudgetStatus` union)
+    - `frontend/web/lib/dashboard-api.ts` (thêm `budget_period` + `budgets_usage` vào `DashboardSummary`)
+    - `frontend/web/app/budgets/page.tsx` + `frontend/web/app/budgets/budgets-client.tsx` (mới — period month picker, CRUD form, list progress bar màu theo status, edit/delete actions)
+    - `frontend/web/app/dashboard/dashboard-client.tsx` (thêm `BudgetsSection` component render trước "Top danh mục chi tiêu", empty state CTA → `/budgets`)
+    - `frontend/web/app/layout.tsx` (thêm nav link `Budgets`)
+  - `progress_log.md`
+- What was implemented:
+  - **5.1 — Model constraint + migration**: `Budget` entity sẵn có từ Phase 0.7. Migration mới `a4b7c8d9e123` add `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()` + `UniqueConstraint(user_id, category_id, period_month, name="uq_budgets_user_category_period")` chặn duplicate.
+  - **5.2 — CRUD API**: POST (201) + 409 khi duplicate, GET list filter `period_month` với pattern `YYYY-MM`, PUT chỉ đổi `amount` (UX: không cho đổi category/period để tránh phá constraint), DELETE hard. Ownership qua `get_budget_for_user` raise `BudgetNotFoundError` → 404. Category phải `is_system=True` hoặc thuộc user.
+  - **5.3 — Usage calculation**: `compute_budget_usage(session, user_id, period_month)` chạy 3 queries (list budgets + SELECT cats IN ids + GROUP BY category SUM amount trong `[first_day..last_day]`). Status: `safe` <80%, `warning` 80-100%, `exceeded` >100%. Sort DESC theo `percent_used` để UI highlight category vượt lên đầu. `GET /api/v1/budgets/usage?period_month=YYYY-MM`.
+  - **5.4 — Dashboard integration**: `/dashboard/summary` thêm `budget_period` (YYYY-MM) + `budgets_usage`. Logic chọn period: `this_month`/`last_month` dùng period của range, các preset khác (`7d`/`30d`/`custom`) dùng tháng của `range.end`.
+  - **Frontend `/budgets`**: month picker filter, form tạo (category + period + amount), form edit (chỉ amount, disabled cat/period), progress bar xanh/vàng/đỏ theo status, badges trạng thái VI, nút Sửa/Xoá confirm dialog. Sort client-side theo percent_used DESC.
+  - **Dashboard `BudgetsSection`**: Empty state CTA → `/budgets`. Khi có data: list cards sorted theo % used DESC (backend đã sort), category dot + name + status badge + spent/budget + percent + progress bar, link "Quản lý →".
+- Validation:
+  - **Backend**: `pytest` **165 passed** (129 → 165: +17 service tests + 19 API tests). `mypy app` clean (51 files). `ruff check app tests` clean (3 unused imports đã fix tự động).
+  - **Frontend**: `pnpm lint` clean, `pnpm exec tsc --noEmit` clean, `pnpm build` thành công. Route size: `/budgets` 3.81 kB First Load 122 kB; `/dashboard` 99.6 kB First Load 218 kB (+~0.5 kB BudgetsSection).
+  - **Migration**: chưa apply lên Postgres thực tế (test dùng SQLite in-memory + SQLModel.metadata.create_all, đã cover UniqueConstraint semantics qua `test_duplicate_raises`).
+- Pending / Next:
+  - **Apply migration lên staging/prod Postgres**: `alembic upgrade head` khi deploy. Rollback: `alembic downgrade -1`.
+  - **Notification/alert khi exceeded**: hiện chỉ UI coloring. Phase 6 có thể thêm email/push khi category vượt budget.
+  - **Budget history/comparison**: chưa có `/budgets/history?from=&to=` hoặc chart time-series nhiều tháng.
+  - **Bulk operations**: không có clone budget từ tháng trước sang tháng này. UX cần khi user muốn carry over.
+  - **E2E test**: chưa viết Playwright spec cho `/budgets` + dashboard budget cards. Nên làm trong Phase 7 hardening.
+  - **Phase 6**: AI insights (spending trends, category recommendations, anomaly detection).
+- Risks / Notes:
+  - **`period_month` format validation**: regex `^\d{4}-(0[1-9]|1[0-2])$` enforce ở cả Pydantic schema và router Query param. Frontend dùng `<input type="month">` nhưng vẫn validate server để phòng client manipulation.
+  - **UniqueConstraint vs "update period"**: Không cho đổi `category_id`/`period_month` trong PUT. Rationale: handle trường hợp mới trùng unique constraint rất confusing UX. User phải delete + tạo lại. Có thể nới lỏng sau nếu feedback cần.
+  - **Usage query performance**: 3 queries/request OK với dataset MVP. Optimize sau bằng 1 query JOIN nếu latency >50ms.
+  - **Boundary status**: `_compute_status` inclusive 80% và 100% (`>=80 <=100` = warning, `>100` = exceeded). Test `test_boundary_warning` verify. Muốn strict thì đổi comparison operator.
+  - **Dashboard budget period choice**: với preset `7d` / `30d` dùng tháng `range.end` → user xem budget tháng hiện tại. Nhược điểm: nếu `30d` overlap 2 tháng (15/4-15/5), chỉ show tháng 5. Acceptable vì budget monitor per-month, không per-rolling-window.
+  - **`updated_at` server-side onupdate**: migration set `server_default=now()` cho backfill, nhưng entity chưa có `onupdate=now()` explicit ở model. Service `update_budget_amount` commit + refresh → verify khi apply Postgres; nếu không auto-update thì add `sa_column_kwargs={"onupdate": sa.func.now()}` ở entity.
+  - **Frontend Decimal → Number**: `formatVnd` coerce qua `Number()` cho `toLocaleString`. Với VND < `Number.MAX_SAFE_INTEGER` (9e15) không mất precision. Nếu mở USD có fractional thì giữ string precision + round chỉ display.

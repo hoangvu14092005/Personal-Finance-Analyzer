@@ -1,14 +1,15 @@
-"""Service `ocr_queue` — producer phía API push OCR job vào TaskIQ Redis queue.
+"""OCR queue service: API push jobs vào Redis queue cho worker.
 
-Thiết kế:
-- Reuse cùng broker config (Redis URL) với worker thông qua `pfa_shared.config`.
-- Đăng ký một "proxy task" cùng tên với task của worker (`tasks:process_ocr_job`)
-  để API có thể dispatch qua kicker tiêu chuẩn của TaskIQ. Body của proxy task
-  chỉ raise vì execution thực do worker đảm nhiệm.
-- KHÔNG còn `sys.path.insert` (anti-pattern import worker code từ API).
-- Lỗi enqueue được log đầy đủ thay vì swallow im lặng.
-- M5: broker được startup/shutdown qua FastAPI lifespan thay vì lazy connect
-  ở lần enqueue đầu (xem `app/main.py`).
+M5 changes:
+- Broker startup/shutdown qua FastAPI lifespan (không lazy connect)
+- Proxy task để API dispatch qua TaskIQ kicker chuẩn
+- Fail-soft: Redis down → enqueue trả False, endpoint rollback sang UPLOADED
+
+Flow:
+1. API startup → startup_ocr_broker() connect Redis
+2. Upload endpoint → enqueue_ocr_job(receipt_id) push job
+3. Worker consume job từ Redis queue
+4. API shutdown → shutdown_ocr_broker() cleanup
 """
 from __future__ import annotations
 
@@ -22,17 +23,15 @@ from app.core.logging import get_logger
 
 logger = get_logger("api.ocr_queue")
 
-# Tên task phải khớp với task worker decorate trong `backend/worker/tasks.py`.
-# TaskIQ default task_name = f"{module_name}:{func_name}".
+# Task name phải khớp với worker task: "tasks:process_ocr_job"
 OCR_TASK_NAME = "tasks:process_ocr_job"
 
 
 @lru_cache(maxsize=1)
 def get_ocr_broker() -> AsyncBroker:
-    """Build broker singleton dùng cùng Redis với worker.
-
-    Đăng ký proxy task với cùng `task_name` như worker để API có thể dispatch
-    qua kicker tiêu chuẩn. Body chỉ raise vì execution thực do worker xử lý.
+    """Build broker singleton với proxy task.
+    
+    Proxy task body chỉ raise vì execution thực do worker xử lý.
     """
     settings = CommonSettings.from_env()
     broker = ListQueueBroker(url=settings.redis_url).with_result_backend(
@@ -50,12 +49,10 @@ def get_ocr_broker() -> AsyncBroker:
 
 async def startup_ocr_broker() -> bool:
     """Khởi tạo broker khi API startup (gọi từ FastAPI lifespan).
-
+    
     Returns:
-        True nếu startup thành công, False nếu broker không init được
-        (vd. Redis down). API vẫn chạy được — `enqueue_ocr_job` sẽ trả
-        False và endpoint upload sẽ rollback sang trạng thái UPLOADED
-        kèm `error_code=queue_unavailable`.
+        True nếu OK, False nếu Redis down.
+        API vẫn chạy được khi False - enqueue sẽ fail-soft.
     """
     try:
         broker = get_ocr_broker()
@@ -68,7 +65,7 @@ async def startup_ocr_broker() -> bool:
 
 
 async def shutdown_ocr_broker() -> None:
-    """Đóng broker khi API shutdown (gọi từ FastAPI lifespan)."""
+    """Đóng broker khi API shutdown."""
     try:
         broker = get_ocr_broker()
         await broker.shutdown()
@@ -79,11 +76,11 @@ async def shutdown_ocr_broker() -> None:
 
 
 async def enqueue_ocr_job(receipt_id: int) -> bool:
-    """Đẩy OCR job vào queue Redis cho worker xử lý.
-
+    """Push OCR job vào Redis queue.
+    
     Returns:
-        True khi enqueue thành công.
-        False khi fail (đã log lỗi đầy đủ kèm `receipt_id` để truy vết).
+        True: enqueue thành công
+        False: fail (đã log lỗi với receipt_id để truy vết)
     """
     broker = get_ocr_broker()
     task = broker.find_task(OCR_TASK_NAME)

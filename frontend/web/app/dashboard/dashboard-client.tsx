@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { getMe } from "@/lib/auth-api";
+import type { BudgetUsage } from "@/lib/budgets-api";
 import {
   DashboardSummary,
   DEFAULT_RANGE_PRESET,
@@ -432,6 +433,12 @@ function DashboardContent({
         />
       </section>
 
+      {/* Budget usage (Phase 5.4) */}
+      <BudgetsSection
+        budgetPeriod={data.budget_period}
+        usages={data.budgets_usage}
+      />
+
       {/* Top categories list */}
       <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <header className="flex items-center justify-between">
@@ -602,5 +609,135 @@ function CompareBar({
         />
       </div>
     </div>
+  );
+}
+
+function budgetStatusBadgeClass(status: BudgetUsage["status"]): string {
+  switch (status) {
+    case "exceeded":
+      return "bg-rose-100 text-rose-800 border-rose-200";
+    case "warning":
+      return "bg-amber-100 text-amber-800 border-amber-200";
+    case "safe":
+    default:
+      return "bg-emerald-100 text-emerald-800 border-emerald-200";
+  }
+}
+
+function budgetStatusLabel(status: BudgetUsage["status"]): string {
+  switch (status) {
+    case "exceeded":
+      return "Vượt";
+    case "warning":
+      return "Sắp vượt";
+    case "safe":
+    default:
+      return "An toàn";
+  }
+}
+
+function budgetProgressColor(status: BudgetUsage["status"]): string {
+  switch (status) {
+    case "exceeded":
+      return "bg-rose-500";
+    case "warning":
+      return "bg-amber-500";
+    case "safe":
+    default:
+      return "bg-emerald-500";
+  }
+}
+
+function BudgetsSection({
+  budgetPeriod,
+  usages,
+}: {
+  budgetPeriod: string;
+  usages: BudgetUsage[];
+}) {
+  // Empty state: chưa set budget nào → CTA sang /budgets.
+  if (usages.length === 0) {
+    return (
+      <section className="space-y-2 rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-center">
+        <h2 className="text-base font-semibold text-slate-900">
+          Ngân sách tháng {budgetPeriod}
+        </h2>
+        <p className="text-sm text-slate-500">
+          Bạn chưa đặt ngân sách nào cho tháng này.
+        </p>
+        <Link
+          href="/budgets"
+          className="inline-block rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+        >
+          Đặt ngân sách
+        </Link>
+      </section>
+    );
+  }
+
+  // Backend đã sort theo percent_used DESC — giữ nguyên thứ tự này.
+  return (
+    <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <header className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">
+            Ngân sách tháng {budgetPeriod}
+          </h2>
+          <p className="text-xs text-slate-500">
+            Sắp xếp theo % sử dụng — danh mục sắp vượt lên đầu.
+          </p>
+        </div>
+        <Link
+          href="/budgets"
+          className="text-sm font-medium text-slate-700 hover:text-slate-900"
+        >
+          Quản lý →
+        </Link>
+      </header>
+
+      <ul className="space-y-3">
+        {usages.map((u) => {
+          const barWidth = Math.min(100, u.percent_used);
+          return (
+            <li key={u.budget_id} className="space-y-1">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <span className="flex items-center gap-2 font-medium text-slate-800">
+                  {u.category_color ? (
+                    <span
+                      aria-hidden
+                      className="h-3 w-3 rounded-full"
+                      style={{ backgroundColor: u.category_color }}
+                    />
+                  ) : null}
+                  {u.category_name}
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-xs font-medium ${budgetStatusBadgeClass(
+                      u.status,
+                    )}`}
+                  >
+                    {budgetStatusLabel(u.status)}
+                  </span>
+                </span>
+                <span className="text-slate-900">
+                  {formatVnd(u.spent_amount)} /{" "}
+                  <span className="text-slate-500">{formatVnd(u.budget_amount)}</span>
+                  <span className="ml-2 text-xs font-medium text-slate-700">
+                    {u.percent_used.toFixed(0)}%
+                  </span>
+                </span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full rounded-full transition-all ${budgetProgressColor(
+                    u.status,
+                  )}`}
+                  style={{ width: `${barWidth}%` }}
+                />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

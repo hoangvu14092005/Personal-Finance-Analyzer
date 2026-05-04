@@ -1,3 +1,10 @@
+"""Receipt file validation: extension, MIME type, file size.
+
+Allowed:
+- Extensions: .jpg, .jpeg, .png, .pdf
+- MIME types: image/jpeg, image/png, application/pdf
+- Max size: configurable (default 10MB)
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,6 +24,11 @@ def validate_upload_file(
     file_size_bytes: int,
     max_file_size_mb: int,
 ) -> None:
+    """Validate receipt file trước khi upload.
+    
+    Raises:
+        HTTPException 400: Invalid extension, MIME type, hoặc file quá lớn
+    """
     extension = Path(upload_file.filename or "").suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(

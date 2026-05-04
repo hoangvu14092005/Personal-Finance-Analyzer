@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Column, DateTime, Numeric, func
+from sqlalchemy import Column, DateTime, Numeric, UniqueConstraint, func
 from sqlmodel import Field, SQLModel
 
 from pfa_shared.enums import ReceiptStatus
@@ -122,16 +122,35 @@ class Transaction(SQLModel, table=True):
 
 class Budget(SQLModel, table=True):
     __tablename__ = "budgets"
+    # Một user chỉ có 1 budget duy nhất cho cặp (category, period_month).
+    # Tránh duplicate → dashboard aggregation deterministic.
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "category_id",
+            "period_month",
+            name="uq_budgets_user_category_period",
+        ),
+    )
 
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", index=True)
     category_id: int = Field(foreign_key="categories.id", index=True)
+    # Format "YYYY-MM" (max 7 chars). Validate ở Pydantic schema.
     period_month: str = Field(max_length=7, index=True)
     amount: Decimal = Field(sa_column=Column(Numeric(12, 2), nullable=False))
     created_at: datetime = Field(
         sa_column=Column(
             DateTime(timezone=True),
             server_default=func.now(),
+            nullable=False,
+        ),
+    )
+    updated_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            server_default=func.now(),
+            onupdate=func.now(),
             nullable=False,
         ),
     )
