@@ -14,6 +14,17 @@ from app.schemas.dashboard import (
     RangeInfo,
     RecentTransactionResponse,
 )
+from app.schemas.insights import (
+    AlertItem,
+    GenerateInsightRequest,
+    InsightItem,
+    InsightPayload,
+    InsightRangeInfo,
+    InsightResponse,
+    InsightStatus,
+    RecommendationItem,
+    Severity,
+)
 from app.schemas.receipts import (
     DraftReviewResponse,
     OcrResultResponse,
@@ -29,6 +40,7 @@ from app.schemas.transactions import (
 )
 
 __all__ = [
+    "AlertItem",
     "AuthResponse",
     "BudgetCreate",
     "BudgetListResponse",
@@ -40,6 +52,12 @@ __all__ = [
     "CategoryResponse",
     "DashboardSummaryResponse",
     "DraftReviewResponse",
+    "GenerateInsightRequest",
+    "InsightItem",
+    "InsightPayload",
+    "InsightRangeInfo",
+    "InsightResponse",
+    "InsightStatus",
     "LoginRequest",
     "OcrResultResponse",
     "PeriodTotalsResponse",
@@ -48,7 +66,9 @@ __all__ = [
     "ReceiptStatusResponse",
     "ReceiptUploadResponse",
     "RecentTransactionResponse",
+    "RecommendationItem",
     "RegisterRequest",
+    "Severity",
     "TransactionCreate",
     "TransactionListMeta",
     "TransactionListResponse",

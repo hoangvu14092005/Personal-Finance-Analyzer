@@ -161,12 +161,21 @@ class InsightSnapshot(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", index=True)
+    # Phase 6 — preset để query "latest của user + preset" dễ hơn.
+    range_preset: str = Field(default="custom", max_length=20, index=True)
     range_start: date = Field(index=True)
     range_end: date = Field(index=True)
+    # Provider nào sinh ra payload (mock/ollama/gemini/...). Để audit.
+    provider: str = Field(default="mock", max_length=50)
     insights_json: str = Field(default="[]")
     recommendations_json: str = Field(default="[]")
     alerts_json: str = Field(default="[]")
+    # SHA256 hex (64 chars). Cache lookup: (user_id, fingerprint) → snapshot.
     fingerprint: str = Field(max_length=128, index=True)
+    # Eligibility fail hoặc lỗi → status != "ready". UI fallback.
+    status: str = Field(default="ready", max_length=20)
+    # Nếu status=insufficient_data/failed → chứa lý do để UI hiển thị.
+    status_reason: str | None = Field(default=None, max_length=500)
     created_at: datetime = Field(
         sa_column=Column(
             DateTime(timezone=True),

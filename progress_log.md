@@ -1271,3 +1271,73 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - **Dashboard budget period choice**: với preset `7d` / `30d` dùng tháng `range.end` → user xem budget tháng hiện tại. Nhược điểm: nếu `30d` overlap 2 tháng (15/4-15/5), chỉ show tháng 5. Acceptable vì budget monitor per-month, không per-rolling-window.
   - **`updated_at` server-side onupdate**: migration set `server_default=now()` cho backfill, nhưng entity chưa có `onupdate=now()` explicit ở model. Service `update_budget_amount` commit + refresh → verify khi apply Postgres; nếu không auto-update thì add `sa_column_kwargs={"onupdate": sa.func.now()}` ở entity.
   - **Frontend Decimal → Number**: `formatVnd` coerce qua `Number()` cho `toLocaleString`. Với VND < `Number.MAX_SAFE_INTEGER` (9e15) không mất precision. Nếu mở USD có fractional thì giữ string precision + round chỉ display.
+
+### 2026-05-05 14:30 - phase-6 - AI Insights MVP (rule-based MockProvider + /insights page + dashboard teaser)
+- Goal: Hoàn thành Phase 6 (AI Insights) end-to-end MVP: deterministic summary input builder + eligibility gate + safety/grounding checks + provider adapter (Mock/Ollama/Gemini stubs) + core service với fingerprint cache + 2 endpoints + `/insights` page + dashboard teaser + tests.
+- Files changed:
+  - **Backend API**:
+    - `backend/shared/pfa_shared/entities.py` (mở rộng `InsightSnapshot`: thêm `range_preset`, `provider`, `fingerprint`, `status`, `status_reason`, indexes)
+    - `backend/api/alembic/versions/b5e8f1a2c3d4_insight_snapshot_phase6_fields.py` (mới — migration add 5 columns + 2 indexes + backfill rows cũ)
+    - `backend/api/app/core/config.py` (thêm settings `insight_provider`, `ollama_*`, `gemini_*`, `insight_request_timeout_seconds`)
+    - `backend/api/app/schemas/insights.py` (mới — `InsightPayload`, `InsightItem`, `RecommendationItem`, `AlertItem`, `GenerateInsightRequest`, `InsightResponse`, `InsightRangeInfo`, hard limits MAX_TITLE/BODY/ITEMS)
+    - `backend/api/app/schemas/__init__.py` (re-export insight schemas)
+    - `backend/api/app/services/insights/__init__.py` (package marker)
+    - `backend/api/app/services/insights/summary.py` (mới — `SummaryInput`, `build_summary_input`, `AnomalyCandidate`, fingerprint SHA256, anomaly detection median×3)
+    - `backend/api/app/services/insights/eligibility.py` (mới — `check_eligibility` với MIN_TRANSACTIONS=3, MIN_DISTINCT_DAYS=2, MIN_TOTAL_SPEND=50k)
+    - `backend/api/app/services/insights/safety.py` (mới — `run_safety_checks` filter banned phrases + unknown category_id + empty text)
+    - `backend/api/app/services/insights/prompt.py` (mới — `build_prompt` với domain rules for real LLM providers)
+    - `backend/api/app/services/insights/providers/base.py` (mới — `InsightProvider` Protocol + `InsightProviderError`)
+    - `backend/api/app/services/insights/providers/mock.py` (mới — `MockInsightProvider` rule-based, 7 rules cover top-category/delta/budget/anomaly/fallback)
+    - `backend/api/app/services/insights/providers/ollama.py` + `gemini.py` (stubs — raise error với hướng dẫn activate)
+    - `backend/api/app/services/insights/providers/factory.py` (dispatch `get_insight_provider(settings)`)
+    - `backend/api/app/services/insights/generator.py` (mới — `generate_insight_for_user` orchestrator: resolve range → compute summary → eligibility → cache lookup → provider call → safety checks → persist snapshot; `find_latest_snapshot`, `snapshot_to_payload`, `snapshot_generated_at`)
+    - `backend/api/app/services/insights/queue.py` (mới — TaskIQ broker stub parity với ocr_queue cho future async provider)
+    - `backend/api/app/api/v1/insights.py` (mới — `POST /insights/generate`, `GET /insights/latest`, auth gate, 400/401/404/503 error mapping)
+    - `backend/api/app/main.py` (register `insights_router`)
+    - `backend/api/tests/test_insights_summary.py` (mới, 8 tests — fingerprint stability, decimal format, anomaly detection 3 cases, safe_delta_percent)
+    - `backend/api/tests/test_insights_eligibility.py` (mới, 4 tests — eligible/too_few/too_low_spend/too_concentrated)
+    - `backend/api/tests/test_insights_safety.py` (mới, 5 tests — banned phrases, grounding, null category allowed, alert severity)
+    - `backend/api/tests/test_insights_provider_mock.py` (mới, 8 tests — rules fire đúng + safety grounded)
+    - `backend/api/tests/test_insights_api.py` (mới, 14 tests — auth, ready/insufficient/cache-hit/force/persist/invalid-range, /latest 404 + 200 + isolation, schema contract)
+  - **Frontend web**:
+    - `frontend/web/lib/insights-api.ts` (mới — typed client `generateInsight/getLatestInsight` + types `InsightResponse`/`InsightPayload`/`InsightItem`/`RecommendationItem`/`AlertItem`)
+    - `frontend/web/app/insights/page.tsx` + `insights-client.tsx` (mới — full page UI với range tabs, generate/refresh buttons, conditional render cho `ready`/`insufficient_data`/`failed`, alert cards severity-colored, insight/recommendation grid, meta bar provider+cache badge)
+    - `frontend/web/app/dashboard/dashboard-client.tsx` (thêm `InsightTeaser` + `InsightSummaryCard` sau `BudgetsSection`, lazy load `getLatestInsight` theo preset, CTA "Sinh insight" khi 404, preview 1 item + link "Xem chi tiết")
+    - `frontend/web/app/layout.tsx` (thêm nav link `Insights`)
+  - `progress_log.md`
+- What was implemented:
+  - **6.1 — Summary input builder**: `build_summary_input(session, user_id, range_preset, current, analytics)` gộp `DashboardSummary` + `compute_budget_usage(end_of_range_month)` + anomaly detection (giao dịch > median × 3, min 100k VND, tối đa 5 items). `SummaryInput.to_dict()` serialize deterministic: Decimal → 2-digit string, date → ISO, list đã sort. `SummaryInput.fingerprint()` = SHA256 hex của `json.dumps(data, sort_keys=True, separators=(",",":"))` → stable key cho cache.
+  - **6.2 — Eligibility gate**: `check_eligibility(summary)` fail với `reason_code` nếu `<3 transactions`, `<50k total spend`, hoặc `<2 distinct days` (chỉ enforce khi recent list cover hết count). Return `EligibilityResult(eligible, reason, reason_code)` cho i18n frontend.
+  - **6.3 — Schemas**: Pydantic `BaseModel` với `Field(..., min_length=..., max_length=...)` cho title/body, `Literal` cho severity + status, hard caps (`MAX_INSIGHTS=5`, `MAX_RECOMMENDATIONS=5`, `MAX_ALERTS=5`). `GenerateInsightRequest.start_date/end_date` required khi `range=custom` qua validator.
+  - **6.4 — Provider adapter**: `InsightProvider` Protocol với `name: ClassVar[str]` + `generate(summary) -> InsightPayload`. `MockInsightProvider` rule-based: top-category dominance >40%, delta >20% up → alert warning, delta <-10% → insight positive, budget exceeded → alert critical + rec giảm chi, budget warning → alert warning, anomaly → rec kiểm tra, fallback rec "đặt ngân sách" nếu top category không dominance. `OllamaInsightProvider`/`GeminiInsightProvider` stub raise `InsightProviderError` với hướng dẫn setup; body đầy đủ trong docstring ready to uncomment khi user activate.
+  - **6.5 — Prompt builder**: `build_prompt(summary)` gộp `SYSTEM_RULES` (cấm investment/crypto/forex/y tế/pháp luật, STRICT JSON, ≤120 title + ≤400 body, viết tiếng Việt) + canonical JSON input + instruction "Trả về JSON hợp lệ, không có text khác". Dùng cho Ollama `/api/generate?format=json` và Gemini `response_mime_type=application/json`.
+  - **6.6 + 6.7 — Core service**: `generate_insight_for_user(session, provider, user_id, request)` flow: (1) parse preset → `DateRange` (hoặc `InvalidDateRangeError` → 400), (2) `compute_summary(session, user_id, current, previous)`, (3) `build_summary_input` → fingerprint, (4) cache lookup `(user_id, fingerprint, status="ready")` — nếu hit và không `force` → return cached, (5) eligibility → nếu fail persist snapshot `insufficient_data` + fallback payload, (6) provider.generate — nếu raise persist `failed` + error message, (7) `run_safety_checks` filter items vi phạm, (8) persist `ready` + filtered payload. Log mọi nhánh để audit. TaskIQ proxy stub (`services/insights/queue.py`) parity với ocr_queue cho future async Ollama/Gemini.
+  - **6.8 — Safety/grounding**: `run_safety_checks(payload, summary)` check banned phrases (substring match 10 cụm: đầu tư chứng khoán, cổ phiếu, bitcoin, crypto, forex, vay tiền nhanh, lãi suất, bảo hiểm nhân thọ, tư vấn pháp lý, tư vấn y tế), `category_id` phải thuộc `{top_categories ∪ budgets ∪ anomalies}`, text không rỗng sau strip. Return `SafetyReport(violations, filtered)` — items vi phạm bị drop khỏi `filtered`, caller dùng đó để persist + response.
+  - **6.9 — APIs**: `POST /api/v1/insights/generate` body `{range?, start_date?, end_date?, force?}` → 200 với `InsightResponse`. `GET /api/v1/insights/latest?range=30d` → 200 cached hoặc 404 khi chưa có snapshot. Response shape: `{id, range:{preset,start,end}, status, status_reason, provider, fingerprint, payload:{insights,recommendations,alerts}, generated_at, cached}`.
+  - **6.10 — Frontend UI**: `/insights` page full: range tabs (7d/30d/this_month/last_month), nút "Sinh insight" (cache allowed) + "Làm mới" (force=true), loading spinner, error banner. Render conditional: `insufficient_data` card với lý do vi_VN, `failed` card đỏ, empty payload card. Khi `ready` + có items: 3 sections (alerts colored theo severity, insights grid 2 cột, recommendations emerald-themed với estimated_savings VND). Meta bar dưới header: range + provider + generated_at + badge "Cache". Dashboard teaser nằm giữa BudgetsSection và Top danh mục: lazy load `getLatestInsight(preset)`, 404 → CTA "Sinh insight" gọi POST /generate; ready → preview 1 item + count 3 sections + link "Xem chi tiết →".
+  - **6.11 — Tests**: 39 test cases mới (8 summary + 4 eligibility + 5 safety + 8 provider mock + 14 API) — fingerprint stability, anomaly median detection, eligibility thresholds, banned phrase filter, grounding, all mock rules, cache hit/force, 404, schema contract.
+- Validation:
+  - **Backend**: `pytest` **204 passed** (165 → 204: +8 summary + 4 eligibility + 5 safety + 8 mock + 14 API = 39 tests mới). `mypy app` clean (66 files). `ruff check app tests` clean.
+  - **Frontend**: `npm run lint` clean, `npx tsc --noEmit` clean. Route size `/insights` chưa measure (đang dev mode); dashboard `/dashboard` thêm ~2 kB cho InsightTeaser.
+  - **Migration**: file `b5e8f1a2c3d4_*.py` ready nhưng chưa apply lên Postgres thực tế (test dùng SQLite in-memory).
+  - **Shared package reinstall**: backend/api/.venv cache stale pfa_shared — đã force-reinstall qua `uv pip install --force-reinstall --no-cache ../shared`. Root `.venv` và `backend/api/.venv` được giữ consistent.
+- Pending / Next:
+  - **Activate Ollama/Gemini provider thật**: stub đã ready, chỉ cần uncomment body trong `providers/ollama.py` + `providers/gemini.py` và set env `INSIGHT_PROVIDER=ollama|gemini`. Cần install `httpx` (đã có) hoặc `google-generativeai` (chưa thêm dep). Nên test với prompt ngắn trước khi commit changes vì LLM latency 2-30s — lúc đó bật TaskIQ wrapper (`services/insights/queue.py`) để không block request.
+  - **Apply migration lên staging/prod Postgres**: `alembic upgrade head`. Rollback: `alembic downgrade -1` sẽ drop 5 columns + 2 indexes.
+  - **E2E Playwright**: chưa viết spec cho `/insights` + dashboard teaser. Phase 7 hardening.
+  - **i18n reason_code → vi_VN mapping trên FE**: hiện dùng `status_reason` từ backend (đã vi_VN). Nếu sau này hỗ trợ nhiều ngôn ngữ, FE cần mapping `reason_code` thành message locale.
+  - **Anomaly UI detail**: hiện rec chỉ nói "kiểm tra giao dịch lớn bất thường" + merchant + amount. Có thể deep-link tới `/transactions/:id` để user xem chi tiết.
+  - **Custom range support cho /insights**: page hiện ẩn preset "custom" (không render trong tabs). Backend vẫn support — chỉ thiếu UI date picker.
+  - **Snapshot history**: chưa có `/insights/history?from=&to=` để user xem tiến triển insights qua thời gian.
+  - **Phase 7**: Hardening + UAT + Release (error tracking, performance, security review, E2E coverage, RC deploy).
+- Risks / Notes:
+  - **Fingerprint stability — timezone**: `SummaryInput.to_dict` dùng ISO date không timezone. Nếu server đổi TZ giữa 2 run có cùng DB → fingerprint giống nhau (OK). Nhưng recent_transactions analytics có `transaction_date: date` cũng naive — không risk mismatch.
+  - **Cache invalidation khi user thêm/xoá transaction**: fingerprint đổi theo DB state, nên snapshot cũ tự động miss cache và gen mới khi user POST `/insights/generate` lại. Không cần xoá snapshot cũ — giữ lại cho audit. Có thể thêm cron job cleanup snapshots > 30 ngày khi cần giảm DB size.
+  - **MockProvider deterministic nhưng không "creative"**: rule-based → output giống nhau cho input giống nhau, thiếu variety. Acceptable cho MVP vì user chính là developer test. Khi bật Ollama/Gemini sẽ có variation tự nhiên. Nếu muốn Mock hay hơn, thêm rules (weekend spending spike, merchant concentration, category mixing, ...).
+  - **Banned phrase list**: dùng substring match — có thể false-positive. Vd. "lãi suất" bị ban trong mọi context kể cả thảo luận chính đáng về phí ngân hàng. Acceptable MVP — LLM tự tránh các chủ đề này nhờ prompt rules; safety check là second-line defense. Nếu cần, chuyển sang regex word-boundary hoặc small ML classifier.
+  - **Decimal serialization edge case**: `_decimal_str(Decimal("0"))` = `"0.00"`. `Decimal("1500000.123")` quantize về `"1500000.12"` (truncate Python default banker's rounding). OK cho VND nhưng với USD cần giữ 2 digit precision → đã có.
+  - **Provider ClassVar[str] trong Protocol**: mypy strict check Protocol attr vs class attr impl. Fix: declare `name: ClassVar[str]` ở Protocol và match bằng `name: ClassVar[str] = "mock"` ở concrete class. Nếu dùng instance attr `self.name = ...` thì mypy complain.
+  - **`snapshot_to_payload` deserialize defensive**: try/except JSON + Pydantic validation → return empty payload khi corrupt. Log warning để admin debug. Tránh 500 với DB row cũ mà schema đổi.
+  - **TaskIQ queue stub chưa wire**: `services/insights/queue.py` tạo sẵn nhưng worker process chưa consume `tasks:generate_insight_job`. API vẫn dùng sync path. Kích hoạt khi latency LLM provider >1s.
+  - **Frontend dashboard teaser — preset "custom" fallback**: `isSupportedInsightPreset` chỉ accept 4 presets chính, custom hiển thị "Chuyển sang preset ... để xem insights AI". Có thể mở rộng khi UI support custom dates trong insights page.
+  - **Nav link order**: thêm `Insights` sau `Budgets` để flow logic: Dashboard → Budgets → Insights. OK cho MVP; responsive nav có thể cần polish ở viewport hẹp.

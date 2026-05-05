@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     ocr_timeout_ms: int = 8000
     ocr_max_file_size_mb: int = 10
 
+    # Insight provider (Phase 6). "mock" = rule-based deterministic (MVP),
+    # "ollama" = local Ollama server, "gemini" = Google Gen AI (cloud).
+    # Các provider thật cần thêm setup (Ollama server / Gemini API key).
+    insight_provider: Literal["mock", "ollama", "gemini"] = "mock"
+    ollama_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.2"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-1.5-flash"
+    insight_request_timeout_seconds: float = 60.0
+
     request_id_header: str = "X-Request-ID"
 
     jwt_secret: str = DEFAULT_JWT_SECRET
