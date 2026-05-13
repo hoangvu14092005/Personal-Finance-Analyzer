@@ -4,7 +4,7 @@ from functools import lru_cache  # cache kết quả để tránh đọc config 
 from typing import Literal
 
 from pfa_shared.enums import AppEnv
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Default placeholder JWT secret cho local/test. Settings validator sẽ reject
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     port: int = 8000
 
     database_url: str = Field(
-        default="postgresql+psycopg://pfa:pfa@localhost:5432/pfa", # postgresql+psycopg://user:password@host:port/database
+        default="postgresql+psycopg://pfa:pfa@localhost:5433/pfa", # postgresql+psycopg://user:password@host:port/database
     )
     redis_url: str = Field(default="redis://localhost:6379/0")
 
@@ -45,15 +45,13 @@ class Settings(BaseSettings):
     ocr_timeout_ms: int = 8000
     ocr_max_file_size_mb: int = 10
 
-    # Insight provider (Phase 6). "mock" = rule-based deterministic (MVP),
-    # "ollama" = local Ollama server, "gemini" = Google Gen AI (cloud).
-    # Các provider thật cần thêm setup (Ollama server / Gemini API key).
-    insight_provider: Literal["mock", "ollama", "gemini"] = "mock"
-    ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.2"
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-1.5-flash"
-    insight_request_timeout_seconds: float = 60.0
+    # Chat LLM provider (Phase 6 — AI Chatbot).
+    chat_llm_base_url: str = "http://localhost:20128/v1"
+    chat_llm_api_key: str = ""
+    chat_llm_model: str = "cx/gpt-5.5"
+    chat_llm_timeout_seconds: float = 60.0
+    chat_max_history_messages: int = 40
+    chat_rate_limit_per_minute: int = 10
 
     request_id_header: str = "X-Request-ID"
 
@@ -64,32 +62,15 @@ class Settings(BaseSettings):
     # secure=True: cookie chỉ gửi qua HTTPS; False để dev local trên HTTP.
     session_cookie_secure: bool = False
     session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
-    cors_origins: list[str] = [
-        "http://localhost:3000", # Frontend dev server
-        "http://127.0.0.1:3000",
-    ]
+    # CORS Origins: comma-separated string để tương thích pydantic-settings v2
+    # (list[str] bị JSON-decode trước khi field_validator chạy → lỗi với .env).
+    # Dùng property `parsed_cors_origins` để lấy list[str].
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
-    # CORS Origin: danh sách domain được phép gọi API từ trình duyệt.
-    # field_validator chạy trước khi Pydantic gán giá trị vào field cors_origins.
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, value: object) -> list[str]:
-        # Validator này chạy trước khi Pydantic gán giá trị vào field cors_origins.
-        # Mục đích: hỗ trợ nhiều định dạng input khác nhau từ biến môi trường.
-
-        if isinstance(value, str):
-            # Nếu value là string (ví dụ từ .env: CORS_ORIGINS="http://localhost:3000,http://localhost:4000")
-            # thì tách theo dấu phẩy và loại bỏ khoảng trắng thừa ở đầu/cuối mỗi phần tử.
-            return [item.strip() for item in value.split(",") if item.strip()]
-
-        if isinstance(value, list):
-            # Nếu value đã là list (ví dụ được truyền trực tiếp trong code),
-            # thì ép kiểu từng phần tử về string và loại bỏ khoảng trắng thừa.
-            return [str(item).strip() for item in value if str(item).strip()]
-
-        # Fallback: nếu value không phải string hay list (ví dụ None hoặc kiểu không hợp lệ),
-        # trả về danh sách mặc định cho môi trường local.
-        return ["http://localhost:3000", "http://127.0.0.1:3000"]
+    @property
+    def parsed_cors_origins(self) -> list[str]:
+        """Parse comma-separated CORS_ORIGINS thành list[str]."""
+        return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
 
     @model_validator(mode="after")
     def _enforce_production_secrets(self) -> Settings:

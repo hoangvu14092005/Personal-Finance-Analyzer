@@ -27,6 +27,13 @@ from app.services.category_suggestion import (
     remember_user_merchant_category,
     suggest_category_for_merchant,
 )
+from app.services.chat.embedding_client import get_embedding_client
+
+
+def _build_search_text(merchant_name: str | None, note: str | None) -> str:
+    """Build text để embed cho semantic_search_transactions."""
+    parts = [p.strip() for p in (merchant_name, note) if p and p.strip()]
+    return " ".join(parts)
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -144,6 +151,19 @@ def create_transaction(
         transaction_date=payload.transaction_date,
         note=payload.note,
     )
+
+    # Phase 7 RAG: embed "merchant + note" for semantic_search_transactions.
+    # Fail-soft: nếu embedding fail (model không load được), vẫn tạo transaction.
+    search_text = _build_search_text(payload.merchant_name, payload.note)
+    import os
+    if search_text and os.getenv("PFA_SKIP_EMBEDDING") != "1":
+        try:
+            embedding_client = get_embedding_client()
+            transaction.search_embedding = embedding_client.embed_sync(search_text)
+        except Exception:  # noqa: BLE001
+            # Log và tiếp tục — search_embedding nullable, có thể backfill sau.
+            pass
+
     session.add(transaction)
     session.commit()
     session.refresh(transaction)
@@ -252,6 +272,23 @@ def update_transaction(
 
     for field, value in update_data.items():
         setattr(transaction, field, value)
+
+    # Re-embed search_embedding khi merchant_name hoặc note đổi (Phase 7 RAG).
+    import os
+    skip_embedding = os.getenv("PFA_SKIP_EMBEDDING") == "1"
+    should_reembed = (
+        "merchant_name" in update_data or "note" in update_data
+    ) and not skip_embedding
+    if should_reembed:
+        search_text = _build_search_text(transaction.merchant_name, transaction.note)
+        if search_text:
+            try:
+                embedding_client = get_embedding_client()
+                transaction.search_embedding = embedding_client.embed_sync(search_text)
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            transaction.search_embedding = None
 
     session.add(transaction)
     session.commit()

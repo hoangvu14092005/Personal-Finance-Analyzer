@@ -62,8 +62,8 @@ export default function RootLayout({
                 <Link href="/budgets" className="hover:text-slate-900">
                   Budgets
                 </Link>
-                <Link href="/insights" className="hover:text-slate-900">
-                  Insights
+                <Link href="/chat" className="hover:text-slate-900">
+                  💬 Trợ lý
                 </Link>
               </nav>
             </div>

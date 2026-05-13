@@ -1341,3 +1341,310 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - **TaskIQ queue stub chưa wire**: `services/insights/queue.py` tạo sẵn nhưng worker process chưa consume `tasks:generate_insight_job`. API vẫn dùng sync path. Kích hoạt khi latency LLM provider >1s.
   - **Frontend dashboard teaser — preset "custom" fallback**: `isSupportedInsightPreset` chỉ accept 4 presets chính, custom hiển thị "Chuyển sang preset ... để xem insights AI". Có thể mở rộng khi UI support custom dates trong insights page.
   - **Nav link order**: thêm `Insights` sau `Budgets` để flow logic: Dashboard → Budgets → Insights. OK cho MVP; responsive nav có thể cần polish ở viewport hẹp.
+
+
+### 2026-05-13 - phase-6 - Replan: Insight batch -> AI Chatbot
+- Goal:
+  - Quyết định chiến lược thay thế Phase 6 "AI Insights" (one-shot batch generation, output fix cứng) bằng "AI Chatbot" (conversational, function calling). Cập nhật toàn bộ kế hoạch + spec trước khi implement.
+- Files changed:
+  - tasks/phase-6-ai-chatbot.md (đổi tên từ phase-6-ai-insights.md, viết lại toàn bộ)
+  - .kiro/specs/ai-chatbot/requirements.md (mới, 10 requirements)
+  - .kiro/specs/ai-chatbot/design.md (mới, kiến trúc + sequence diagram + module layout)
+  - .kiro/specs/ai-chatbot/tasks.md (mới, 10 tasks với entry/exit criteria)
+  - roadmap.md (update Phase 6 description + deliverables)
+  - project_map.md (đổi tất cả reference insights -> chat)
+- What was implemented:
+  - **Verified LLM endpoint**: test thành công `http://localhost:20128/v1` model `cx/gpt-5.5` cho basic chat, function calling (tool_calls + finish_reason=tool_calls), streaming SSE (33 chunks), multi-turn tool result -> natural language answer.
+  - **Phân tích cái hiện có vs cần**: giữ services `analytics`, `budgets`, `date_ranges`, `category_suggestion`; bỏ hoàn toàn module `services/insights/` + `api/v1/insights.py` + `schemas/insights.py` + frontend `/insights` (~1200 dòng BE + ~300 dòng FE).
+  - **Kiến trúc chatbot**: function calling thay RAG; LLM không truy cập DB trực tiếp, luôn qua tool layer scoped user_id; SSE streaming; chat history unlimited persist `chat_messages` table.
+  - **7 query tools** được định nghĩa: query_spending_summary, search_transactions, get_budget_status, compare_periods, get_top_merchants, get_spending_by_day, get_recent_transactions.
+  - **Safety**: banned phrases filter (tái sử dụng từ insight cũ), rate limit 10/phút/user in-memory, user_id override defense-in-depth, system prompt tiếng Việt với rules rõ ràng.
+  - **Frontend redesign**: chỉ đổi 1 page `/insights` -> `/chat`, không redesign các page khác. Match design tokens hiện tại (slate palette, rounded-md, Tailwind).
+  - **Lộ trình 10 tasks**: 6.0 cleanup, 6.1 queries, 6.2 LLM client, 6.3 persistence, 6.4 tool registry, 6.5 orchestrator, 6.6 safety+rate-limit, 6.7 API SSE, 6.8 frontend UI, 6.9 observability+docs, 6.10 optional RAG.
+- Validation:
+  - Test LLM endpoint với function calling + streaming: pass.
+  - Docs consistency check: roadmap + project_map + tasks phase-6 + spec requirements/design/tasks đồng bộ phase 6 mới.
+  - Không có reference "insight" nào bị bỏ sót trong docs trừ các mention lịch sử trong progress_log.
+- Pending / Next:
+  - Task 6.0: cleanup dead code insight (backend + frontend + migration drop insight_snapshots).
+  - Task 6.1 + 6.2 + 6.3: parallel-able (query layer + LLM client + persistence).
+  - User confirm trước khi bắt đầu implement (đang chờ).
+- Risks / Notes:
+  - LLM endpoint hiện local-only; production cần API key thật + HTTPS.
+  - Rate limit in-memory không share giữa API replicas; chấp nhận cho MVP single-instance, swap Redis khi scale.
+  - Chat history unlimited theo yêu cầu user -> không auto-expire; cần monitor table size và thêm archival policy sau 6 tháng nếu cần.
+  - Entity `InsightSnapshot` vẫn còn tạm trong shared/entities; drop ở task 6.0 hoặc 6.3.
+  - Frontend chat UI dùng native fetch + ReadableStream + SSE parse (không dùng EventSource vì EventSource không gửi được body cho POST); đây là pattern chuẩn cho chatbot streaming.
+
+
+### 2026-05-13 - phase-7/8-planning - RAG Extension + UI Redesign specs
+- Goal:
+  - Lên kế hoạch Phase 7 (RAG Extension cho chatbot) và Phase 8 (UI Redesign theo DESIGN.md) sau khi Phase 6 (Chatbot) hoàn tất.
+- Files changed:
+  - .kiro/specs/rag-extension/requirements.md (mới, 8 requirements)
+  - .kiro/specs/rag-extension/design.md (mới, architecture + module layout + data model)
+  - .kiro/specs/rag-extension/tasks.md (mới, 9 tasks với entry/exit criteria)
+  - .kiro/specs/ui-redesign/requirements.md (mới, 10 requirements)
+  - .kiro/specs/ui-redesign/design.md (mới, file structure + component specs + migration strategy)
+  - .kiro/specs/ui-redesign/tasks.md (mới, 13 tasks page-by-page)
+  - tasks/phase-7-rag-extension.md (mới)
+  - tasks/phase-8-ui-redesign.md (mới)
+  - roadmap.md (update: Phase 7 RAG, Phase 8 UI Redesign, shift Hardening → 9, Post-MVP → 10)
+- What was implemented:
+  - **Phase 7 — RAG Extension planning**:
+    - Phân tích ý tưởng RAG ban đầu (5 use cases), chỉnh lại còn 2 use case cốt lõi cho MVP (receipt OCR + semantic transaction search).
+    - Defer app knowledge + chat memory + category explanation RAG sang phase sau vì chưa cần ngay.
+    - Quyết định technical stack:
+      - pgvector extension (tận dụng PostgreSQL hiện có, không thêm service)
+      - sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (free, 384-dim, CPU-friendly, tốt tiếng Việt)
+      - Một bảng receipt_text_chunks + column transactions.search_embedding (thay vì 2 bảng tách)
+      - SQL filter user_id + date trước vector search (isolation + performance)
+      - Index async trong worker, không block upload flow
+    - 9 tasks với tổng ước tính 6-7 ngày.
+  - **Phase 8 — UI Redesign planning**:
+    - Đọc toàn bộ DESIGN.md (PostHog-style: cream canvas + yellow CTA + IBM Plex Sans + hairline cards + pastel callouts + hedgehog mascots).
+    - Phân tích sự khác biệt với UI hiện tại (slate palette, generic Tailwind defaults).
+    - Lên chiến lược migration page-by-page, không big-bang rewrite.
+    - Quyết định technical stack:
+      - Tailwind extend theme thay vì chuyển sang shadcn/Radix
+      - next/font/google cho IBM Plex Sans (auto-optimize, no CLS)
+      - Emoji mascots (💰 🧾 📊 💬) làm placeholder thay hedgehog illustrations (không có designer)
+      - primitive components trong components/ui/ tách riêng components/layout/
+    - 13 tasks với tổng ước tính 10-12 ngày.
+    - Risk mitigation: nếu không đủ thời gian, ưu tiên tokens + dashboard + chat (pages showcase nhất).
+- Validation:
+  - Specs tuân theo cấu trúc requirements/design/tasks đã có (giống architecture-analysis-documentation, ai-chatbot).
+  - Roadmap updated, phase numbering shift hợp lý.
+  - Chưa implement code — đang pending user confirm để bắt đầu.
+- Pending / Next:
+  - User confirm bắt đầu Phase 7 hay Phase 8 trước.
+  - Đề xuất: Phase 7 trước (RAG có giá trị user ngay) → Phase 8 (UI) sau khi features stable.
+- Risks / Notes:
+  - **Phase 7 risks**:
+    - Embedding dimension lock: nếu sau này đổi model, phải re-embed toàn bộ (cần migration + backfill).
+    - pgvector ivfflat index cần tune lists parameter theo data size.
+    - sentence-transformers load model ~500MB RAM; cần check server memory.
+    - Model inference CPU: ~50-100ms/embed → scale với 10k receipts có thể chậm; cần monitoring.
+  - **Phase 8 risks**:
+    - IBM Plex Sans load ở Việt Nam có thể chậm qua Google Fonts (CDN latency); cần check Vietnamese subset.
+    - Emoji rendering khác OS (iOS vs Android vs Windows); chấp nhận cho MVP.
+    - Tailwind theme extend có thể conflict với Tailwind defaults; test ở styleguide page trước.
+    - E2E Playwright tests có thể break do selector đổi; dự trù update selectors kèm mỗi page migration.
+  - **Scheduling**: Phase 7 và 8 có thể chạy song song nếu có 2 devs. Một dev backend RAG, một dev frontend UI. Nếu 1 dev: làm Phase 7 trước.
+
+
+### 2026-05-13 - planning - Rearrange phase numbering for consistency
+- Goal:
+  - Đồng bộ tên và số phase giữa các tài liệu: không còn 2 phase 7 hoặc 2 phase 8 trùng.
+- Files changed:
+  - tasks/phase-7-hardening-uat-release.md → tasks/phase-9-hardening-uat-release.md (rename + update nội dung số 7 → 9, cập nhật đề cập chat/RAG)
+  - tasks/phase-8-post-mvp.md → tasks/phase-10-post-mvp.md (rename + update nội dung số 8 → 10, thêm candidate tasks từ Phase 7/8 deferred)
+  - project_map.md (update task list: phase-6 chatbot, 7 rag, 8 ui, 9 hardening, 10 post-mvp)
+  - roadmap.md (update "Thứ tự triển khai khuyến nghị": 8 RAG → 9 UI → 10 hardening → 11 post-mvp; update Candidate scope Phase 10)
+- What was implemented:
+  - Phase numbering cuối cùng: 0 Foundation · 1 Auth · 2 Receipts OCR · 3 Transactions · 4 Dashboard · 5 Budgets · 6 AI Chatbot · 7 RAG Extension · 8 UI Redesign · 9 Hardening UAT Release · 10 Post-MVP.
+  - Phase 9 (hardening) đã thêm reference đến chat observability, RAG performance tuning, pgvector deployment note.
+  - Phase 10 (post-MVP) giờ chứa các tính năng defer từ Phase 7 (chat memory RAG, app knowledge RAG) và Phase 8 (custom mascots).
+- Validation:
+  - `tasks/` folder: 11 files, thứ tự number nhất quán.
+  - Không còn reference nào cũ đến "phase 7 - hardening" hoặc "phase 8 - post-mvp".
+  - Roadmap + project_map + task files đồng bộ.
+- Pending / Next:
+  - User quyết định bắt đầu Phase 7 (RAG) hoặc Phase 8 (UI) trước.
+- Risks / Notes:
+  - Đánh số phase lớn hơn (có 10 phase) có thể gây cảm giác scope phình; thực tế Phase 10 là optional backlog không phải lộ trình bắt buộc.
+
+
+### 2026-05-13 - phase-7 - RAG Extension implementation (backend complete)
+- Goal:
+  - Implement Phase 7 — RAG extension cho chatbot. Thêm 2 RAG tools (search_receipt_text, semantic_search_transactions) qua pgvector + sentence-transformers.
+- Files changed:
+  - Dependencies:
+    - backend/api/pyproject.toml (thêm pgvector, sentence-transformers)
+    - backend/worker/pyproject.toml (thêm pgvector, sentence-transformers)
+    - backend/shared/pyproject.toml (thêm pgvector)
+  - Entities:
+    - backend/shared/pfa_shared/entities.py (thêm EMBEDDING_DIMENSION const, ReceiptTextChunk entity, Transaction.search_embedding column, CASCADE delete ReceiptTextChunk → ReceiptUpload)
+    - backend/api/app/models/entities.py (re-export ReceiptTextChunk)
+  - Migration:
+    - backend/api/alembic/versions/c1d2e3f4a5b6_chat_messages_and_pgvector_rag.py (combined: chat_messages + enable pgvector + receipt_text_chunks + transactions.search_embedding + ivfflat indexes)
+  - Embedding client:
+    - backend/api/app/services/chat/embedding_client.py (Protocol + LocalEmbeddingClient với lru_cache singleton, dimension assert, async embed via asyncio.to_thread)
+    - backend/worker/embedding_client.py (copy cho worker, sync version)
+  - RAG queries:
+    - backend/api/app/services/chat/rag_queries.py (search_receipt_text + semantic_search_transactions, SQL filter user_id trước vector search)
+    - backend/api/app/services/chat/tools.py (register 2 tools mới vào TOOL_REGISTRY)
+    - backend/api/app/services/chat/system_prompt.py (thêm QUY TẮC SỬ DỤNG TOOL: SQL vs RAG)
+  - Transaction embedding:
+    - backend/api/app/api/v1/transactions.py (embed search_text khi create/update, gated bởi PFA_SKIP_EMBEDDING env var cho tests)
+  - Worker index task:
+    - backend/worker/index_tasks.py (chunk_text, clean_ocr_text, run_index_receipt_text, @broker.task index_receipt_text)
+    - backend/worker/tasks.py (chain index_receipt_text.kiq sau OCR READY, fail-soft)
+  - Backfill scripts:
+    - backend/api/scripts/backfill_transaction_embeddings.py
+    - backend/api/scripts/backfill_receipt_embeddings.py
+  - Testing:
+    - backend/api/tests/conftest.py (autouse fixture set PFA_SKIP_EMBEDDING=1 → tests không load model)
+- What was implemented:
+  - **Technical spike (7.0)**:
+    - Verified sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2: dimension=384, load 37s, encode 23ms/text.
+    - Vietnamese semantic match hoạt động: query "đồ skincare" → top match "Watsons" (0.369), query "trà sữa" → match cao.
+    - pgvector extension chưa install vì Docker không chạy lúc test — sẽ verify khi user start Docker.
+  - **Entity + migration (7.1, 7.3)**:
+    - EMBEDDING_DIMENSION = 384 const lock để tránh mismatch.
+    - `ReceiptTextChunk`: id, user_id FK, receipt_upload_id FK CASCADE, chunk_text, chunk_index, embedding VECTOR(384), source_type, created_at.
+    - `Transaction.search_embedding` nullable column.
+    - Migration combined: chat_messages (Phase 6 chưa migrate) + pgvector extension + receipt_text_chunks + transactions.search_embedding + ivfflat indexes với lists=50.
+    - Downgrade reversible.
+  - **Embedding client (7.2)**:
+    - Protocol `EmbeddingClient` với embed_sync, embed (async), embed_batch.
+    - `LocalEmbeddingClient` lazy load model trong __init__, assert dimension, log load time.
+    - `get_embedding_client()` lru_cache singleton.
+  - **RAG queries (7.5, 7.6)**:
+    - `search_receipt_text`: SQL filter user_id + optional date_range/merchant/receipt_id → JOIN với transactions để lấy metadata → vector search `cosine_distance`. Return chunks với receipt_id, merchant_name, date, amount.
+    - `semantic_search_transactions`: SQL filter user_id + date + amount → vector search trên `transactions.search_embedding`. Bỏ qua transactions có search_embedding NULL.
+    - Both tools respect limit cap (10 cho receipt, 20 cho transactions).
+    - LIKE wildcard escaping cho merchant.
+  - **Tool registry (7.4)**:
+    - 2 tool definitions mới với JSON Schema đúng OpenAI spec.
+    - System prompt mô tả rõ khi nào dùng SQL vs RAG (nội dung hóa đơn → search_receipt_text, ý nghĩa mơ hồ → semantic_search_transactions).
+  - **Transaction embedding**:
+    - `_build_search_text(merchant_name, note)` helper.
+    - Create transaction: embed search_text nếu non-empty, fail-soft exception.
+    - Update transaction: re-embed khi merchant_name hoặc note đổi.
+    - ENV `PFA_SKIP_EMBEDDING=1` bypass toàn bộ → tests nhanh (7s thay vì 48s).
+  - **Worker index pipeline**:
+    - `chunk_text`: conditional split — text ≤500 chars không split; text dài split với max_size=400, overlap=80.
+    - `clean_ocr_text`: normalize whitespace.
+    - `run_index_receipt_text` idempotent: DELETE chunks cũ trước INSERT (re-index OK).
+    - `index_receipt_text` TaskIQ task chain sau OCR READY, fail-soft.
+  - **Backfill scripts**:
+    - `backfill_transaction_embeddings`: batch 50, embed tất cả transactions có search_embedding NULL.
+    - `backfill_receipt_embeddings`: index tất cả receipts có OCR nhưng chưa có chunks.
+- Validation:
+  - Backend ruff: All checks passed.
+  - Backend mypy: 61 source files, 0 issues.
+  - Worker ruff: clean.
+  - Backend pytest: **181 passed in 7.09s** (tăng từ 181 tests phase 6 mà không thêm test mới — chưa viết test cho RAG queries + index_tasks, sẽ làm khi Docker ready).
+  - Test speed: giữ ~7s nhờ PFA_SKIP_EMBEDDING guard (nếu không guard thì 48s do load model).
+  - Frontend build không đụng phase này.
+- Pending / Next:
+  - User cần start Docker → chạy `alembic upgrade head` để apply migration (tạo table + enable pgvector).
+  - Sau migration: chạy backfill scripts nếu có transactions/receipts cũ.
+  - Viết unit tests cho RAG queries (mock embedding) + index_tasks (mock model).
+  - Manual acceptance test 5 câu hỏi sample (cần Docker + real LLM + real receipts).
+  - Phase 8 (UI Redesign) có thể bắt đầu song song nếu có 2 devs.
+- Risks / Notes:
+  - **Docker dependency**: migration và integration test cần PostgreSQL với pgvector. SQLite không support vector nhưng SQLModel tạo table bình thường (pgvector lib graceful) → unit tests pass.
+  - **Model load memory**: sentence-transformers chiếm ~500MB RAM sau load. Production cần server ≥ 2GB RAM. Load 1 lần per process (lru_cache).
+  - **Embedding latency**: embed_sync trong API request path = ~20-50ms CPU. Với high-volume create transactions sẽ chậm. Nên cân nhắc async embed qua worker task cho scale.
+  - **Ivfflat index tuning**: lists=50 phù hợp ≤100k rows. Cần tăng khi scale → tune bằng `SET ivfflat.probes`. Cần monitoring performance khi production.
+  - **Re-embedding cost**: nếu sau này đổi model → phải re-embed toàn bộ (backfill scripts sẵn sàng nhưng tốn thời gian linearly với dataset).
+  - **Dimension lock**: `EMBEDDING_DIMENSION = 384` const trong `pfa_shared/entities.py` khớp với model. Đổi model khác dimension → migration schema + re-embed.
+  - **PFA_SKIP_EMBEDDING env var**: chỉ dùng cho tests. Production KHÔNG set, tránh silent skip gây RAG tools không tìm được data.
+  - **FutureWarning**: `get_sentence_embedding_dimension` đã rename thành `get_embedding_dimension` trong version mới. Code vẫn chạy nhưng nên update.
+  - **Worker embedding_client duplicated** từ API — chưa move vào `pfa_shared` vì tránh add heavy dep vào shared package. Nếu trong tương lai cần consistent, extract sang shared.
+
+
+### 2026-05-13 - phase-7.5 - Real OCR (LLM Vision) + pgvector deployment
+- Goal:
+  - Implement real OCR provider dùng LLM Vision (cx/gpt-5.5 qua multimodal API).
+  - Deploy pgvector extension và apply Phase 6+7 migrations.
+- Files changed:
+  - backend/worker/ocr_provider.py (thêm LLMVisionOCRProvider với extract_text + normalize_receipt qua LLM, base64 inline image, MIME detection từ magic bytes; get_ocr_provider() dispatch theo OCR_PROVIDER env var)
+  - backend/worker/pyproject.toml (thêm httpx dependency)
+  - backend/worker/.env (OCR_PROVIDER=llm_vision + CHAT_LLM_*)
+  - backend/worker/.env.example (thêm OCR_PROVIDER template)
+  - infra/docker/docker-compose.yml (đổi image postgres:16-alpine → pgvector/pgvector:pg16, port 5432 → 5433 tránh conflict với Postgres native Windows)
+  - backend/api/.env, backend/api/.env.example, backend/api/alembic.ini, backend/api/app/core/config.py (DATABASE_URL port 5432 → 5433)
+  - backend/worker/.env, backend/worker/.env.example (DATABASE_URL port 5432 → 5433)
+  - backend/shared/pfa_shared/config.py (default port 5432 → 5433)
+  - README.md (document port thay đổi)
+- What was implemented:
+  - **Vision spike**: verified endpoint `http://localhost:20128/v1` hỗ trợ multimodal OpenAI spec. Test với ảnh PNG tạo bằng PIL có text "HELLO RECEIPT Merchant: Grab Amount: 185,000 VND" → LLM extract đúng toàn bộ text. Status 200, confidence cao.
+  - **LLMVisionOCRProvider**:
+    - `extract_text(content, source_hint)`: detect MIME từ magic bytes (JPEG/PNG/GIF/WEBP), fallback extension; encode base64 inline; POST /chat/completions với content=[text prompt + image_url data URI]; parse response content; confidence heuristic 0.9/0.5 theo length text.
+    - `normalize_receipt(raw)`: gửi raw_text → LLM với OCR_NORMALIZE_PROMPT yêu cầu JSON strict (merchant, transaction_date ISO, total_amount number, currency); strip markdown code fences nếu có; parse JSON; defensive defaults (Unknown, today, 0, VND) nếu field missing/invalid.
+    - `_parse_normalized`: defensive parsing — date.fromisoformat fail → today; amount có thousand separators → remove trước Decimal(); truncate merchant 255 chars, currency 10 chars.
+    - Timeout 120s cho vision request (ảnh lớn có thể chậm).
+  - **Factory dispatch**: `OCR_PROVIDER=llm_vision` + env `CHAT_LLM_BASE_URL/API_KEY/MODEL` → LLMVisionOCRProvider. Missing config → warn log + fallback mock.
+  - **pgvector deployment**:
+    - Đổi image `postgres:16-alpine` → `pgvector/pgvector:pg16` (đã build-in vector extension).
+    - Port 5432 conflict với native PostgreSQL Windows → đổi sang 5433.
+    - Reset volume data cũ (Remove-Item ./data/postgres).
+    - Migration `c1d2e3f4a5b6_chat_messages_and_pgvector_rag` apply thành công:
+      - CREATE EXTENSION vector (phiên bản 0.8.2)
+      - Create table `chat_messages` (Phase 6)
+      - Create table `receipt_text_chunks` với column `embedding VECTOR(384)` + IVFFlat index (lists=50)
+      - ALTER TABLE transactions ADD COLUMN search_embedding VECTOR(384) + partial IVFFlat index
+    - Seed 8 default categories thành công.
+- Validation:
+  - Docker containers healthy: postgres (port 5433), redis, minio.
+  - `SELECT extname, extversion FROM pg_extension WHERE extname='vector'` → vector 0.8.2 installed.
+  - `\dt` trong psql: 11 tables hiện diện bao gồm chat_messages, receipt_text_chunks.
+  - Alembic migration chain: 6 migrations apply lên version c1d2e3f4a5b6 không lỗi.
+  - Seed categories: 8 rows.
+  - Vision test: LLM extract text từ ảnh PIL-generated chính xác 100% keywords.
+- Pending / Next:
+  - (Optional) Run backfill scripts nếu có data production cũ.
+  - Test end-to-end: upload receipt thật → worker process OCR bằng LLM vision → embed chunks → chatbot trả lời câu hỏi về nội dung hóa đơn.
+  - Phase 8 (UI Redesign) có thể bắt đầu.
+- Risks / Notes:
+  - **Port 5433 permanent**: docs và env examples đều đã update. Nếu dev mới clone repo cần read README.md cho port note.
+  - **Vision latency**: mỗi receipt OCR tốn 2 LLM calls (extract + normalize) = ~3-8s tùy ảnh. Có thể merge thành 1 call "extract AND normalize" để tối ưu sau.
+  - **Vision cost**: mỗi ảnh tốn ~2000-5000 tokens (ảnh base64 + response). Production cần budget monitoring.
+  - **Fallback graceful**: nếu CHAT_LLM_* không set → log warn + dùng MockOCRProvider (không crash worker).
+  - **Image size limit**: LLM có thể reject ảnh quá lớn. Worker nên compress/resize trước gửi (defer).
+  - **Multi-page PDF**: hiện chỉ hỗ trợ single-page image. PDF → cần convert trang đầu (defer).
+  - **Native PostgreSQL conflict**: user có PostgreSQL cài native Windows (port 5432); đổi Docker → 5433. Nếu user stop native service có thể revert 5432 sau.
+
+
+### 2026-05-13 - phase-7 - E2E test with real OCR + RAG SUCCESS
+- Goal:
+  - Test end-to-end toàn bộ flow: upload receipt → OCR bằng LLM Vision → index embedding → chatbot trả lời câu hỏi dùng RAG.
+- Files changed:
+  - backend/worker/worker_app.py (thêm load_dotenv() để tự động load .env file khi start worker)
+  - backend/worker/pyproject.toml (thêm python-dotenv dependency)
+  - backend/api/.env + backend/worker/.env (thêm STORAGE_BACKEND=s3 để API và Worker dùng chung MinIO thay vì local filesystem khác nhau)
+- What was implemented:
+  - **Identified 2 issues during E2E**:
+    1. API upload lưu file vào `backend/api/data/receipts/`, worker chạy từ `backend/worker/` tìm ở `backend/worker/data/receipts/` → mismatch paths → OCR fail "storage_key missing".
+    2. Worker `worker_app.py` dùng `CommonSettings.from_env()` gọi `os.getenv` nhưng không load `.env` file → worker không biết OCR_PROVIDER/CHAT_LLM_* env vars.
+  - **Fix 1**: set STORAGE_BACKEND=s3 cho cả API và Worker → dùng chung MinIO bucket `pfa-receipts`.
+  - **Fix 2**: import `python-dotenv` vào worker_app.py, `load_dotenv()` trước khi import CommonSettings → env vars từ `.env` được load vào `os.environ` trước khi settings đọc.
+- Validation — E2E test results:
+  - ✅ Register user thành công.
+  - ✅ Login và set cookie session.
+  - ✅ Upload receipt image (PIL-generated, 12.6KB PNG với text tiếng Việt về Highland Coffee).
+  - ✅ Worker nhận task `process_ocr_job`, download ảnh từ MinIO, gửi tới LLM Vision.
+  - ✅ **OCR quality**: LLM trả raw text chính xác 100% tên món, số tiền, ngày tháng tiếng Việt:
+    ```
+    HIGHLANDCOFFEE
+    Dia chi: 123 Nguyen Hue, Q1, TPHCM
+    Ngay: 2026-05-13
+    Ca phe sua da     45.000 VND
+    Banh mi kep ga    65.000 VND
+    Tra dao cam sa    55.000 VND
+    Tong cong:       165.000 VND
+    ```
+  - ✅ **Normalize output**: `{"merchant": "HIGHLANDCOFFEE", "transaction_date": "2026-05-13", "total_amount": "165000", "currency": "VND"}` — parse đúng JSON từ LLM.
+  - ✅ Draft review API trả về đầy đủ data.
+  - ✅ Create transaction (POST /transactions) thành công, kèm suggest category.
+  - ✅ Worker chain `index_receipt_text` sau OCR READY → embed chunks lưu vào receipt_text_chunks.
+  - ✅ **Chatbot test 3 câu hỏi**:
+    1. "Tháng này tôi tiêu bao nhiêu?" → bot gọi `query_spending_summary` → trả "165.000 VND, 1 giao dịch, Danh mục: Bills — 165.000 VND". Số chính xác.
+    2. "Hóa đơn Highland Coffee hôm nay có những món gì?" → bot gọi `search_receipt_text` → "Chưa đủ dữ liệu". Fail vì receipt date=2026-05-13 nhưng "hôm nay" runtime = 2026-05-14. Không bịa data — đúng behavior mong muốn.
+    3. "Tôi có mua cà phê tuần này không?" → bot gọi CẢ 2 tools (search_receipt_text + semantic_search_transactions) → trả **"Có. Tuần này bạn có hóa đơn HIGHLANDCOFFEE ngày 13/05/2026, trong đó có món Cà phê sữa đá – 45.000 VND"**. CHÍNH XÁC HOÀN TOÀN từ OCR content.
+- Pending / Next:
+  - Fix nhỏ: câu hỏi 2 fail do "hôm nay" khác với date ghi trên receipt. Có thể improve bằng:
+    - System prompt: gợi ý LLM dùng "tuần này" / "tháng này" khi date không rõ.
+    - Tool expand date range: nếu "hôm nay" không match, thử "7d" trước khi fallback.
+  - Viết unit tests cho rag_queries.py, embedding_client.py, index_tasks.py (vẫn pending từ Phase 7.7).
+  - Phase 8 — UI Redesign sẵn sàng để triển khai.
+- Risks / Notes:
+  - **Ảnh PIL-generated rõ ràng, đơn giản**: OCR LLM xử lý đạt 100%. Ảnh hóa đơn thật (scan giấy, chụp điện thoại, ánh sáng kém) chưa test — có thể kết quả thấp hơn.
+  - **OCR 2 lần call LLM**: mỗi receipt tốn ~20s (10s/call). Với production cần optimize: merge prompt "extract + normalize" thành 1 call, hoặc cache.
+  - **OCR xử lý tiếng Việt không dấu**: ảnh test có `Ngay`, `Tong cong` (no dấu). LLM handle OK. Thử ảnh có dấu thật (`Ngày`, `Tổng cộng`) sẽ cần test thêm.
+  - **Date parsing**: normalize trả đúng `2026-05-13` dù format raw là `Ngay: 2026-05-13`. LLM đủ thông minh.
+  - **STORAGE_BACKEND=s3 permanent**: dev giờ phải chạy MinIO. Nếu muốn dùng local FS trở lại, set STORAGE_BACKEND=local + chạy cả 2 service từ cùng root folder.
+  - **dotenv load order**: `load_dotenv` phải trước `from pfa_shared.config import CommonSettings`. Đã note rõ trong worker_app.py.

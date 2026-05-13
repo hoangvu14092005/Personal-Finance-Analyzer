@@ -12,10 +12,15 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Column, DateTime, Numeric, UniqueConstraint, func
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, UniqueConstraint, func
 from sqlmodel import Field, SQLModel
 
 from pfa_shared.enums import ReceiptStatus
+
+# Embedding dimension cho sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2.
+# Lock const để tránh mismatch giữa entity và embedding client.
+EMBEDDING_DIMENSION = 384
 
 
 class User(SQLModel, table=True):
@@ -111,6 +116,12 @@ class Transaction(SQLModel, table=True):
     currency: str = Field(default="VND", max_length=10)
     transaction_date: date = Field(index=True)
     note: str | None = Field(default=None, max_length=1000)
+    # Embedding của "merchant_name + note" để semantic_search_transactions (Phase 7).
+    # Nullable để transactions cũ chưa index vẫn tồn tại. Script backfill sẽ fill sau.
+    search_embedding: list[float] | None = Field(
+        default=None,
+        sa_column=Column(Vector(EMBEDDING_DIMENSION), nullable=True),
+    )
     created_at: datetime = Field(
         sa_column=Column(
             DateTime(timezone=True),
@@ -203,11 +214,70 @@ class UserMerchantMapping(SQLModel, table=True):
     )
 
 
+class ChatMessage(SQLModel, table=True):
+    """Chat message entity (Phase 6 — AI Chatbot)."""
+
+    __tablename__ = "chat_messages"
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    role: str = Field(max_length=20)  # "user" | "assistant" | "tool"
+    content: str | None = Field(default=None)
+    tool_calls_json: str | None = Field(default=None)
+    tool_call_id: str | None = Field(default=None, max_length=100)
+    tool_name: str | None = Field(default=None, max_length=100)
+    created_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            server_default=func.now(),
+            nullable=False,
+        ),
+    )
+
+
+class ReceiptTextChunk(SQLModel, table=True):
+    """Receipt OCR text chunk với embedding (Phase 7 — RAG).
+
+    Mỗi receipt sau khi OCR xong được split thành chunks (nếu text > 500 chars)
+    và embed để chatbot tool `search_receipt_text` tìm được nội dung chi tiết.
+    """
+
+    __tablename__ = "receipt_text_chunks"
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    # CASCADE delete: khi receipt bị xóa, chunks cũng xóa theo.
+    receipt_upload_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("receipt_uploads.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
+    )
+    chunk_text: str
+    chunk_index: int = Field(default=0)
+    embedding: list[float] = Field(
+        sa_column=Column(Vector(EMBEDDING_DIMENSION), nullable=False),
+    )
+    source_type: str = Field(default="receipt_ocr", max_length=32)
+    created_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            server_default=func.now(),
+            nullable=False,
+        ),
+    )
+
+
 __all__ = [
+    "EMBEDDING_DIMENSION",
     "Budget",
     "Category",
+    "ChatMessage",
     "InsightSnapshot",
     "OcrResult",
+    "ReceiptTextChunk",
     "ReceiptUpload",
     "Transaction",
     "User",

@@ -1,8 +1,21 @@
 from __future__ import annotations
 
-from pfa_shared.config import CommonSettings
-from pfa_shared.logging import get_logger
-from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend
+from pathlib import Path
+
+# Load .env from worker folder before CommonSettings.from_env() reads os.environ.
+# Must run BEFORE importing pfa_shared.config.
+try:
+    from dotenv import load_dotenv
+    _env_path = Path(__file__).parent / ".env"
+    if _env_path.exists():
+        load_dotenv(_env_path)
+except ImportError:
+    # dotenv optional — fallback to shell env vars
+    pass
+
+from pfa_shared.config import CommonSettings  # noqa: E402
+from pfa_shared.logging import get_logger  # noqa: E402
+from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend  # noqa: E402
 
 settings = CommonSettings.from_env()
 logger = get_logger("worker", level=settings.log_level)
@@ -11,4 +24,3 @@ logger.info("Initializing worker broker")
 broker = ListQueueBroker(url=settings.redis_url).with_result_backend(
     RedisAsyncResultBackend(redis_url=settings.redis_url),
 )
-

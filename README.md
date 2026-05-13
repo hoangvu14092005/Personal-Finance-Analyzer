@@ -116,7 +116,7 @@ docker compose ps
 ```
 
 Services:
-- PostgreSQL: `localhost:5432`
+- PostgreSQL: `localhost:5433` (đổi từ 5432 để tránh conflict với PostgreSQL native trên Windows)
 - Redis: `localhost:6379`
 - MinIO API: `http://localhost:9000`
 - MinIO Console: `http://localhost:9001`

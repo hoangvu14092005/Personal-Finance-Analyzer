@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -16,12 +16,6 @@ import {
   getDashboardSummary,
   isRangePreset,
 } from "@/lib/dashboard-api";
-import {
-  generateInsight,
-  getLatestInsight,
-  isInsightEmpty,
-  type InsightResponse,
-} from "@/lib/insights-api";
 
 import { CategoryChart } from "./category-chart";
 
@@ -445,9 +439,6 @@ function DashboardContent({
         usages={data.budgets_usage}
       />
 
-      {/* AI Insights teaser (Phase 6.10) */}
-      <InsightTeaser preset={data.range.preset} />
-
       {/* Top categories list */}
       <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <header className="flex items-center justify-between">
@@ -749,179 +740,4 @@ function BudgetsSection({
       </ul>
     </section>
   );
-}
-
-function InsightTeaser({ preset }: { preset: string }) {
-  // Card teaser: lazy load latest insight cho preset hiện tại. Nếu chưa có
-  // → CTA "Sinh insight" gọi POST /generate (chỉ provider mock — sync nhanh).
-  // Card này KHÔNG block dashboard nếu API lỗi: hiển thị fallback message.
-  const supportedPreset = isSupportedInsightPreset(preset);
-  const [insight, setInsight] = useState<InsightResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [notFound, setNotFound] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!supportedPreset) return;
-    let cancelled = false;
-    void (async () => {
-      setLoading(true);
-      setError(null);
-      setNotFound(false);
-      try {
-        const result = await getLatestInsight(preset as RangePreset);
-        if (!cancelled) setInsight(result);
-      } catch (err) {
-        const e = err as Error & { status?: number };
-        if (e.status === 404) {
-          if (!cancelled) {
-            setInsight(null);
-            setNotFound(true);
-          }
-        } else if (!cancelled) {
-          setError(e.message || "Không tải được insight");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [preset, supportedPreset]);
-
-  const onGenerate = async () => {
-    setGenerating(true);
-    setError(null);
-    setNotFound(false);
-    try {
-      const result = await generateInsight({
-        range: preset as RangePreset,
-      });
-      setInsight(result);
-    } catch (err) {
-      const e = err as Error;
-      setError(e.message || "Không sinh được insight");
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  if (!supportedPreset) {
-    return (
-      <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-base font-semibold text-slate-900">AI Insights</h2>
-        <p className="text-sm text-slate-500">
-          Chuyển sang preset 7d/30d/this_month/last_month để xem insights AI.
-        </p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <header className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-base font-semibold text-slate-900">AI Insights</h2>
-          <p className="text-xs text-slate-500">
-            Phân tích & cảnh báo dựa trên chi tiêu kỳ này.
-          </p>
-        </div>
-        <Link
-          href="/insights"
-          className="text-sm font-medium text-slate-700 hover:text-slate-900"
-        >
-          Xem chi tiết →
-        </Link>
-      </header>
-
-      {loading ? (
-        <p className="text-sm text-slate-500">Đang tải insight…</p>
-      ) : null}
-
-      {!loading && error ? (
-        <p className="text-sm text-rose-700">{error}</p>
-      ) : null}
-
-      {!loading && notFound ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
-          <span>Chưa có insight cho phạm vi này.</span>
-          <button
-            type="button"
-            onClick={() => void onGenerate()}
-            disabled={generating}
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
-          >
-            {generating ? "Đang sinh…" : "Sinh insight"}
-          </button>
-        </div>
-      ) : null}
-
-      {!loading && insight ? <InsightSummaryCard insight={insight} /> : null}
-    </section>
-  );
-}
-
-function InsightSummaryCard({ insight }: { insight: InsightResponse }) {
-  if (insight.status === "insufficient_data") {
-    return (
-      <p className="text-sm text-slate-600">
-        {insight.status_reason ?? "Chưa đủ dữ liệu để sinh insight."}
-      </p>
-    );
-  }
-  if (insight.status === "failed") {
-    return (
-      <p className="text-sm text-rose-700">
-        {insight.status_reason ?? "Tạo insight thất bại — thử lại sau."}
-      </p>
-    );
-  }
-  if (isInsightEmpty(insight.payload)) {
-    return (
-      <p className="text-sm text-slate-600">
-        Không có cảnh báo nào — chi tiêu trong kỳ ổn định.
-      </p>
-    );
-  }
-
-  const previewItem =
-    insight.payload.alerts[0] ??
-    insight.payload.insights[0] ??
-    insight.payload.recommendations[0];
-  const totalCount =
-    insight.payload.alerts.length +
-    insight.payload.insights.length +
-    insight.payload.recommendations.length;
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-        <span>
-          {insight.payload.alerts.length} cảnh báo • {insight.payload.insights.length}{" "}
-          phân tích • {insight.payload.recommendations.length} đề xuất
-        </span>
-        {insight.cached ? (
-          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-800">
-            Cache
-          </span>
-        ) : null}
-      </div>
-      {previewItem ? (
-        <article className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
-          <p className="font-medium text-slate-900">{previewItem.title}</p>
-          <p className="mt-1 text-slate-600 line-clamp-2">{previewItem.body}</p>
-        </article>
-      ) : null}
-      {totalCount > 1 ? (
-        <p className="text-xs text-slate-500">
-          Còn {totalCount - 1} mục khác — bấm “Xem chi tiết” để xem đầy đủ.
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function isSupportedInsightPreset(preset: string): boolean {
-  return preset === "7d" || preset === "30d" || preset === "this_month" || preset === "last_month";
 }

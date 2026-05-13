@@ -16,7 +16,7 @@ settings = get_settings()
 # Engine singleton, thread-safe, connection pooling
 engine = create_engine(settings.database_url, echo=False)
 
-
+# Hàm này chỉ dùng cho testing. Production dùng Alembic migrations.
 def get_session() -> Generator[Session, None, None]:
     """FastAPI dependency: inject DB session vào endpoints.
     
@@ -30,7 +30,7 @@ def get_session() -> Generator[Session, None, None]:
     with Session(engine) as session:
         yield session
 
-
+# Chỉ dùng cho testing. Production dùng Alembic migrations.
 def create_db_and_tables() -> None:
     """Tạo tables từ SQLModel definitions.
     

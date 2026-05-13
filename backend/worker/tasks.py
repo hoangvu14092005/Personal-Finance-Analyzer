@@ -137,12 +137,28 @@ def run_ocr_for_receipt(
 @broker.task
 async def process_ocr_job(receipt_id: int) -> str:
     """TaskIQ entry point: tạo engine/session/storage rồi delegate.
-    
+
     Worker là long-lived process, engine pooled qua SQLModel.
+    Sau OCR READY, chain task `index_receipt_text` để embed OCR text cho RAG.
     """
     engine = create_engine(settings.database_url)
     storage = build_storage_service(settings)
     provider = get_ocr_provider()
 
     with Session(engine) as session:
-        return run_ocr_for_receipt(session, storage, provider, receipt_id)
+        result = run_ocr_for_receipt(session, storage, provider, receipt_id)
+
+    # Phase 7 RAG: chain index task nếu OCR thành công.
+    # Fail-soft: nếu enqueue fail, log warning, không crash OCR job.
+    if result == "ready":
+        try:
+            from index_tasks import index_receipt_text
+            await index_receipt_text.kiq(receipt_id)
+        except Exception as exc:
+            import logging
+            logging.getLogger("worker.ocr").warning(
+                "failed to chain index_receipt_text for receipt_id=%d: %s",
+                receipt_id, exc,
+            )
+
+    return result

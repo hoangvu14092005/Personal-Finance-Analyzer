@@ -2,7 +2,7 @@ name: pfa-local
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: pfa-postgres-dev
     restart: unless-stopped
     environment:
@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-pfa}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pfa}
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - ./.data/postgres:/var/lib/postgresql/data
     healthcheck:

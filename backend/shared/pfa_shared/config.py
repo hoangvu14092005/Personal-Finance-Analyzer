@@ -57,7 +57,7 @@ class CommonSettings:
             redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
             database_url=os.getenv(
                 "DATABASE_URL",
-                "postgresql+psycopg://pfa:pfa@localhost:5432/pfa",
+                "postgresql+psycopg://pfa:pfa@localhost:5433/pfa",
             ),
             s3_endpoint=os.getenv("S3_ENDPOINT", "http://localhost:9000"),
             s3_region=os.getenv("S3_REGION", "us-east-1"),

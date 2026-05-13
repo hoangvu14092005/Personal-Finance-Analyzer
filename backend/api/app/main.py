@@ -8,8 +8,8 @@ from app.api.health import router as health_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.budgets import router as budgets_router
 from app.api.v1.categories import router as categories_router
+from app.api.v1.chat import router as chat_router
 from app.api.v1.dashboard import router as dashboard_router
-from app.api.v1.insights import router as insights_router
 from app.api.v1.receipts import router as receipts_router
 from app.api.v1.transactions import router as transactions_router
 from app.core.config import get_settings
@@ -47,7 +47,7 @@ app = FastAPI(
 # allow_methods: chấp nhận tất cả HTTP methods (GET, POST, PUT, DELETE, ...).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=settings.parsed_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -60,7 +60,7 @@ app.include_router(receipts_router, prefix=settings.api_v1_prefix)
 app.include_router(transactions_router, prefix=settings.api_v1_prefix)
 app.include_router(dashboard_router, prefix=settings.api_v1_prefix)
 app.include_router(budgets_router, prefix=settings.api_v1_prefix)
-app.include_router(insights_router, prefix=settings.api_v1_prefix)
+app.include_router(chat_router, prefix=settings.api_v1_prefix)
 
 # Request → CORSMiddleware → RequestIdMiddleware → Endpoint
 # Response ← CORSMiddleware ← RequestIdMiddleware ← Endpoint

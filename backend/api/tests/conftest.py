@@ -64,6 +64,16 @@ def _reset_storage_singleton() -> Generator[None, None, None]:
     get_storage_service.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _mock_embedding_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skip embedding trong tests để tránh load model 500MB.
+
+    Set env var `PFA_SKIP_EMBEDDING=1` — code path trong transactions.py
+    sẽ bypass embedding. search_embedding = None (nullable).
+    """
+    monkeypatch.setenv("PFA_SKIP_EMBEDDING", "1")
+
+
 @pytest.fixture
 def db_session(engine: Engine) -> Generator[Session, None, None]:
     with Session(engine) as session:

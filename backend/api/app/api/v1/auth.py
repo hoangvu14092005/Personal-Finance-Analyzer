@@ -30,7 +30,7 @@ def to_profile_response(user: User) -> ProfileResponse:
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def register(
     payload: RegisterRequest,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_session), 
 ) -> AuthResponse:
     existing_user = session.exec(select(User).where(User.email == payload.email)).first()
     if existing_user is not None:

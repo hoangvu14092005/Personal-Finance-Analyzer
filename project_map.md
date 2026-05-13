@@ -10,7 +10,7 @@ personal-finance-analyzer/
 │  │  │  ├─ receipts/
 │  │  │  ├─ transactions/
 │  │  │  ├─ budgets/
-│  │  │  ├─ insights/
+│  │  │  ├─ chat/
 │  │  │  ├─ settings/
 │  │  │  ├─ layout.tsx
 │  │  │  ├─ page.tsx
@@ -27,7 +27,7 @@ personal-finance-analyzer/
 │  │  │  ├─ transactions/
 │  │  │  ├─ dashboard/
 │  │  │  ├─ budgets/
-│  │  │  └─ insights/
+│  │  │  └─ chat/
 │  │  ├─ lib/
 │  │  │  ├─ api/
 │  │  │  ├─ hooks/
@@ -54,7 +54,7 @@ personal-finance-analyzer/
 │  │  │  │  │  ├─ transactions.py
 │  │  │  │  │  ├─ dashboard.py
 │  │  │  │  │  ├─ budgets.py
-│  │  │  │  │  └─ insights.py
+│  │  │  │  │  └─ chat.py
 │  │  │  ├─ core/
 │  │  │  │  ├─ config.py
 │  │  │  │  ├─ security.py
@@ -83,8 +83,7 @@ personal-finance-analyzer/
 │  │  ├─ app/
 │  │  │  ├─ jobs/
 │  │  │  │  ├─ process_ocr_job.py
-│  │  │  │  ├─ refresh_analytics_job.py
-│  │  │  │  └─ generate_insight_job.py
+│  │  │  │  └─ refresh_analytics_job.py
 │  │  │  ├─ consumers/
 │  │  │  ├─ services/
 │  │  │  ├─ providers/
@@ -126,9 +125,11 @@ personal-finance-analyzer/
 │  ├─ phase-3-transactions.md
 │  ├─ phase-4-dashboard-analytics.md
 │  ├─ phase-5-budgets.md
-│  ├─ phase-6-ai-insights.md
-│  ├─ phase-7-hardening-uat-release.md
-│  └─ phase-8-post-mvp.md
+│  ├─ phase-6-ai-chatbot.md
+│  ├─ phase-7-rag-extension.md
+│  ├─ phase-8-ui-redesign.md
+│  ├─ phase-9-hardening-uat-release.md
+│  └─ phase-10-post-mvp.md
 ├─ system_prompt.md
 ├─ project_map.md
 ├─ tech_stack.md
@@ -140,14 +141,14 @@ personal-finance-analyzer/
 
 ### `frontend/`
 Chứa toàn bộ mã giao diện và orchestration ở phía client/server-rendered UI.
-- Quản lý auth flow, dashboard UI, receipt upload UI, review OCR draft, transactions CRUD, budgets, insights.
+- Quản lý auth flow, dashboard UI, receipt upload UI, review OCR draft, transactions CRUD, budgets, chatbot hỏi đáp chi tiêu.
 - Tập trung vào trải nghiệm người dùng, loading state, error state, form state, route protection.
 - Không đặt business rule phức tạp hoặc logic OCR/AI ở đây.
 
 ### `backend/`
 Chứa toàn bộ năng lực xử lý nghiệp vụ, dữ liệu, background jobs và tích hợp ngoài.
 - `api/`: FastAPI app, expose REST endpoints, auth/session, validation, service orchestration.
-- `worker/`: xử lý nền cho OCR, analytics refresh, AI insights.
+- `worker/`: xử lý nền cho OCR, analytics refresh.
 - `shared/`: shared schema, prompt, domain helper để api và worker dùng chung.
 
 ## Chức năng chính theo khu vực
@@ -156,7 +157,7 @@ Chứa toàn bộ năng lực xử lý nghiệp vụ, dữ liệu, background jo
 
 #### `frontend/web/app`
 Entry point theo Next.js App Router.
-- Route group cho auth, dashboard, receipts, transactions, budgets, insights, settings.
+- Route group cho auth, dashboard, receipts, transactions, budgets, chat, settings.
 - Chứa layout, page, loading, error, server component/page composition.
 
 #### `frontend/web/components`
@@ -165,7 +166,7 @@ UI components tái sử dụng.
 - `forms/`: form field, receipt upload form, transaction form, budget form.
 - `charts/`: wrappers cho chart chi tiêu, budget progress, trend chart.
 - `layout/`: navbar, sidebar, header, page shell.
-- `domain/`: receipt card, transaction row, insight card.
+- `domain/`: receipt card, transaction row, chat bubble, suggested question.
 
 #### `frontend/web/features`
 Tách theo nghiệp vụ.
@@ -174,7 +175,7 @@ Tách theo nghiệp vụ.
 - `transactions/`: list/filter/create/edit/delete transaction.
 - `dashboard/`: summary cards, spending trends, category breakdown.
 - `budgets/`: create/update budget, progress, alerts.
-- `insights/`: AI insight view, refresh state, feedback actions.
+- `chat/`: chat UI conversational, streaming message display, history view, suggested questions.
 
 #### `frontend/web/lib`
 Hạ tầng phía frontend.
@@ -199,7 +200,7 @@ REST endpoints public/internal cho web app.
 - `transactions.py`: CRUD transaction, filter, pagination.
 - `dashboard.py`: summary, breakdown, trend.
 - `budgets.py`: CRUD budget, progress, status.
-- `insights.py`: lấy insight hiện tại, tạo insight mới.
+- `chat.py`: chat API với SSE streaming (POST /chat/message), history CRUD.
 
 #### `backend/api/app/core`
 Hạ tầng hệ thống.
@@ -211,13 +212,13 @@ Hạ tầng hệ thống.
 
 #### `backend/api/app/models`
 ORM models cho PostgreSQL.
-- User, ReceiptUpload, OcrResult, Transaction, Category, Budget, InsightSnapshot, UserMerchantMapping.
+- User, ReceiptUpload, OcrResult, Transaction, Category, Budget, ChatMessage, UserMerchantMapping.
 
 #### `backend/api/app/schemas`
 Pydantic schemas vào/ra.
 - Request/response DTO.
 - OCR normalized payload.
-- Insight structured output.
+- Chat message schema (role/content/tool_calls).
 
 #### `backend/api/app/services`
 Application service layer.
@@ -227,7 +228,7 @@ Application service layer.
 - Transaction service.
 - Dashboard aggregation service.
 - Budget service.
-- Insight generation orchestration.
+- Chat orchestrator (LLM client + tool dispatch).
 
 #### `backend/api/app/repositories`
 Data access layer.
@@ -239,7 +240,7 @@ Pure business rules.
 - Validation quy tắc budget.
 - Transaction categorization helper.
 - Dashboard aggregation logic thuần.
-- Rule-based fallback cho insight input.
+- Chat tool registry và safety rules.
 
 #### `backend/api/app/integrations`
 Tích hợp ngoài qua adapter.
@@ -253,7 +254,6 @@ Tích hợp ngoài qua adapter.
 Background job definitions.
 - `process_ocr_job.py`: trích xuất dữ liệu từ receipt image.
 - `refresh_analytics_job.py`: recompute summary/cache khi transaction thay đổi.
-- `generate_insight_job.py`: gọi LLM hoặc rule engine tạo insight snapshot.
 
 #### `backend/worker/app/consumers`
 Queue handlers, retry policy, dead-letter strategy.
@@ -273,7 +273,7 @@ Logic nghiệp vụ dùng chung giữa api và worker.
 Schema chuẩn hóa dùng lại để tránh lệch contract.
 
 #### `backend/shared/prompts`
-Prompt versioning cho normalize OCR và generate insights.
+Prompt versioning cho normalize OCR và system prompt chatbot.
 
 ## Mapping module với functional requirements
 
@@ -305,11 +305,11 @@ Prompt versioning cho normalize OCR và generate insights.
 - `backend/api/app/api/v1/budgets.py`
 - `backend/api/app/services/budget_service.py`
 
-### AI Insights
-- `frontend/web/features/insights`
-- `backend/api/app/api/v1/insights.py`
-- `backend/worker/app/jobs/generate_insight_job.py`
-- `backend/shared/prompts/`
+### AI Chatbot
+- `frontend/web/app/chat/` (chat UI, streaming, history, suggested questions)
+- `backend/api/app/api/v1/chat.py` (SSE endpoint + history CRUD)
+- `backend/api/app/services/chat/` (query layer, llm client, orchestrator, safety)
+- `backend/shared/prompts/` (system prompt tiếng Việt cho chatbot)
 
 ## Luồng dữ liệu end-to-end
 1. User upload receipt ở frontend.
@@ -320,14 +320,16 @@ Prompt versioning cho normalize OCR và generate insights.
 6. User lưu transaction.
 7. Backend ghi transaction + enqueue `refresh_analytics_job`.
 8. Dashboard summary được recompute/cache trong Redis hoặc DB snapshot.
-9. Backend enqueue hoặc gọi `generate_insight_job` từ summary data.
-10. Frontend hiển thị dashboard + insight mới nhất.
+9. Backend API enqueue hoặc gọi analytics refresh job khi cần precompute.
+10. Frontend hiển thị dashboard + user có thể mở trang /chat để hỏi đáp tự nhiên.
+11. Chatbot nhận câu hỏi, gọi các query tool trên backend (scoped theo user_id), tổng hợp → trả lời streaming.
 
 ## Boundary quan trọng
 - Frontend không được gọi OCR/LLM trực tiếp.
 - Backend API không giữ xử lý OCR/AI nặng trong request lifecycle nếu có thể đẩy sang worker.
 - Worker không quyết định UI state; chỉ cập nhật processing state và output chuẩn hóa.
 - AI insight chỉ đọc summary data hoặc structured transaction data, không đọc raw image trực tiếp.
+- Chatbot truy cập DB qua tool layer backend scoped theo user_id; LLM không nhận raw SQL, không bao giờ có DB credentials.
 - Business rules nằm ở backend domain/service layer, không nằm trong component UI.
 
 ## Thứ tự ưu tiên khi triển khai
@@ -337,5 +339,5 @@ Prompt versioning cho normalize OCR và generate insights.
 4. Transaction CRUD.
 5. Dashboard summary.
 6. Budget.
-7. AI insights.
+7. AI chatbot.
 8. Hardening, observability, UAT.

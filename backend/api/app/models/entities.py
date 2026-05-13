@@ -5,8 +5,10 @@ from __future__ import annotations
 from pfa_shared.entities import (
     Budget,
     Category,
+    ChatMessage,
     InsightSnapshot,
     OcrResult,
+    ReceiptTextChunk,
     ReceiptUpload,
     Transaction,
     User,
@@ -16,8 +18,10 @@ from pfa_shared.entities import (
 __all__ = [
     "Budget",
     "Category",
+    "ChatMessage",
     "InsightSnapshot",
     "OcrResult",
+    "ReceiptTextChunk",
     "ReceiptUpload",
     "Transaction",
     "User",

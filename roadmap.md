@@ -28,9 +28,11 @@ Hoàn thành MVP của **Personal Finance Analyzer (Web)** với kiến trúc t�
 | 3 | Transactions & Review | Review OCR draft, manual entry, CRUD transaction |
 | 4 | Dashboard & Analytics | Summary, filters, charts, compare previous period |
 | 5 | Budgets | Budget CRUD, usage calculation, warnings |
-| 6 | AI Insights | Insight generation pipeline, cache, UI, safety fallback |
-| 7 | Hardening, UAT & Release | Observability, security, performance, test pack, release checklist |
-| 8 | Post-MVP | Export, insight history, OCR optimization, personalization |
+| 6 | AI Chatbot | Chat conversational với function calling, query on-demand từ DB thực, không hallucinate |
+| 7 | RAG Extension | pgvector + embedding, 2 RAG tools (search_receipt_text, semantic_search_transactions) |
+| 8 | UI Redesign | Apply DESIGN.md: cream canvas + yellow CTA + IBM Plex Sans + cards hairline |
+| 9 | Hardening, UAT & Release | Observability, security, performance, test pack, release checklist |
+| 10 | Post-MVP | Export, insight history, OCR optimization, personalization |
 
 ## Phase 0 - Foundation & Architecture
 ### Mục tiêu
@@ -133,24 +135,73 @@ Cho phép user đặt ngân sách theo category và nhìn thấy mức sử dụ
 - Dashboard hiển thị đúng % used và exceeded state
 - Warning khớp dữ liệu giao dịch thực tế
 
-## Phase 6 - AI Insights
+## Phase 6 - AI Chatbot
 ### Mục tiêu
-Sinh insight bám dữ liệu thật, có schema ổn định, có cache và fallback an toàn.
+Xây dựng chatbot conversational cho phép user hỏi đáp tự nhiên về chi tiêu cá nhân.
+Tất cả số liệu phải từ DB thực (không hallucinate), tái sử dụng services sẵn có.
 
 ### Deliverables
-- Summary-to-LLM input builder
-- Insight provider adapter cho Ollama/Gemini
-- TaskIQ job `generate_insight_job`
-- Pydantic output schema + post-validation checks
-- Insight APIs + insight UI
-- Caching theo data fingerprint
+- Bỏ module insight cũ (one-shot, fix cứng, UX kém linh hoạt)
+- Chat query service layer: wrap các analytics/budget services thành tools LLM gọi được
+- LLM client OpenAI-compatible với function calling + streaming (SSE)
+- Chat orchestrator: multi-turn loop, tool execution, history management
+- Chat API endpoints: POST message (SSE), GET history, DELETE history
+- Table `chat_messages` persist unlimited lịch sử theo user
+- Frontend chat UI thay trang /insights cũ, match design tokens hiện tại
+- Safety layer: banned phrases, rate limit, user isolation enforcement
+
+### Provider
+- Endpoint mặc định: `http://localhost:20128/v1` (OpenAI-compatible)
+- Model: `cx/gpt-5.5`
+- Đã verify: function calling + streaming + multi-turn tool result hoạt động
 
 ### Done khi
-- Hệ thống sinh ra insights/recommendations/alerts parse được
-- Insight không mâu thuẫn rõ ràng với summary data
-- Thiếu dữ liệu thì trả fallback có kiểm soát
+- User hỏi "Tháng này tôi tiêu bao nhiêu ở Grab?" → bot trả lời số chính xác từ DB
+- ≥ 5 loại câu hỏi phổ biến hoạt động: tổng chi, so sánh kỳ, top merchant, budget, search
+- Streaming mượt, first token < 300ms
+- Chat history persist và load lại được khi reload page
+- Không leak data giữa users (tool execute với đúng user_id server-side)
+- Backend coverage > 80% cho module `services/chat/`
 
-## Phase 7 - Hardening, UAT & Release
+## Phase 7 - RAG Extension
+### Mục tiêu
+Mở rộng chatbot sang hybrid retrieval: SQL tools (số liệu) + RAG tools (nội dung text).
+
+### Deliverables
+- pgvector extension + ReceiptTextChunk entity + Transaction.search_embedding column
+- Local embedding client (sentence-transformers, multilingual MiniLM, 384-dim)
+- Index pipeline worker: embed OCR text khi receipt ready
+- Tool search_receipt_text: tìm nội dung chi tiết hóa đơn
+- Tool semantic_search_transactions: search theo ý nghĩa mơ hồ
+- System prompt update với RAG usage rules
+
+### Done khi
+- User hỏi "Hóa đơn Grab ngày X có món gì?" → bot trả đúng từ OCR
+- User hỏi "Tôi có mua đồ skincare không?" → semantic match được
+- Không leak data giữa users
+- SQL vẫn là source of truth cho số liệu
+
+## Phase 8 - UI Redesign
+### Mục tiêu
+Apply design system mô tả trong DESIGN.md (PostHog-style) cho toàn bộ frontend.
+
+### Deliverables
+- Tailwind theme extend với design tokens (colors, typography, spacing, radius)
+- IBM Plex Sans Variable font loading
+- Primitive components: Button, Card, Input, PillTab, CalloutBanner, Badge
+- Layout chrome: Nav + Footer + MobileDrawer
+- Redesign mỗi page: landing, auth, dashboard, transactions, receipts, budgets, chat
+- Responsive mobile/tablet/desktop
+- Accessibility Lighthouse ≥ 90
+
+### Done khi
+- Canvas cream #eeefe9, yellow CTA #f7a501, IBM Plex Sans ở mọi page
+- Cards flat với hairline borders, không drop-shadow
+- Chat UI có mascot + bubbles phân biệt user/assistant đúng spec
+- E2E Playwright tests pass sau migration
+- Lighthouse accessibility ≥ 90
+
+## Phase 9 - Hardening, UAT & Release
 ### Mục tiêu
 Đưa MVP lên mức đủ ổn định để UAT và release.
 
@@ -167,17 +218,20 @@ Sinh insight bám dữ liệu thật, có schema ổn định, có cache và fal
 - Không còn blocker/critical bug
 - Có đủ tài liệu để deploy staging/prod
 
-## Phase 8 - Post-MVP
+## Phase 10 - Post-MVP
 ### Mục tiêu
 Mở rộng sản phẩm sau khi MVP ổn định và có usage thực tế.
 
 ### Candidate scope
 - OCR optimization theo vendor/template
 - Export CSV/PDF
-- Insight history
+- Chat memory RAG (summarize history qua N messages)
+- App knowledge RAG (FAQ, user guide)
 - Merchant learning nâng cao
 - Personalization sâu hơn
-- Explainability tốt hơn cho insight
+- Explainability cho chat answer (hiển thị transactions được tính vào tổng)
+- Reranking với cross-encoder + hybrid search BM25+vector
+- Custom mascot illustrations thay emoji placeholder
 
 ## Thứ tự triển khai khuyến nghị
 1. Foundation
@@ -186,8 +240,11 @@ Mở rộng sản phẩm sau khi MVP ổn định và có usage thực tế.
 4. Draft review + transaction save
 5. Dashboard summary
 6. Budget integration
-7. AI insight với provider mock trước, provider thật sau
-8. Hardening + UAT + release
+7. AI chatbot với function calling (provider OpenAI-compatible, `cx/gpt-5.5`)
+8. RAG extension (receipt OCR search + semantic transaction search)
+9. UI redesign theo DESIGN.md
+10. Hardening + UAT + release
+11. Post-MVP (optional phases)
 
 ## Cách dùng roadmap trong vibecoding
 1. Đọc `progress_log.md` trước khi viết code.
