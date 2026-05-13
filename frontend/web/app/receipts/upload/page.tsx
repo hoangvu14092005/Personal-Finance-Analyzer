@@ -6,6 +6,12 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { getMe } from "@/lib/auth-api";
 import { getReceiptStatus, uploadReceipt } from "@/lib/receipts-api";
+import {
+  Button,
+  CalloutBanner,
+  Card,
+  DisplayLg,
+} from "@/components/ui";
 
 type FlowState = "idle" | "uploading" | "processing" | "ready" | "failed";
 
@@ -99,8 +105,6 @@ export default function ReceiptUploadPage() {
       }
 
       if (result.status === "uploaded") {
-        // Queue unavailable: backend đặt status="uploaded" + error_code; user
-        // có thể chuyển sang nhập tay hoặc thử lại sau.
         setFlowState("failed");
         setMessage(
           "OCR queue tạm không khả dụng. Bạn có thể nhập tay hoặc thử upload lại.",
@@ -121,59 +125,79 @@ export default function ReceiptUploadPage() {
 
   if (!authReady) {
     return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-8">
-        <p className="text-sm text-slate-600">Đang xác thực phiên đăng nhập...</p>
-      </section>
+      <Card>
+        <p className="text-body-sm text-mute">Đang xác thực phiên đăng nhập...</p>
+      </Card>
     );
   }
 
+  const severity: "info" | "success" | "warning" =
+    flowState === "ready"
+      ? "success"
+      : flowState === "failed"
+        ? "warning"
+        : "info";
+
   return (
-    <section className="space-y-6 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+    <div className="max-w-2xl mx-auto space-y-6">
       <header>
-        <h1 className="text-2xl font-bold text-slate-900">Upload hóa đơn</h1>
-        <p className="text-sm text-slate-600">
-          Hỗ trợ JPG, PNG, PDF 1 trang. Sau khi OCR xong sẽ chuyển sang trang review.
+        <DisplayLg>Upload hóa đơn</DisplayLg>
+        <p className="text-body-sm text-body mt-1">
+          Hỗ trợ JPG, PNG, PDF 1 trang. AI tự đọc thông tin và tạo draft.
         </p>
       </header>
 
-      <form className="space-y-4" onSubmit={onSubmit}>
-        <input
-          type="file"
-          accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
-          onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
-          className="block w-full text-sm text-slate-700"
-        />
-        <button
-          type="submit"
-          disabled={!canSubmit}
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {flowState === "uploading"
-            ? "Đang upload..."
-            : flowState === "processing"
-              ? "Đang xử lý OCR..."
-              : "Upload hóa đơn"}
-        </button>
-      </form>
+      <Card>
+        <form className="space-y-4" onSubmit={onSubmit}>
+          <label className="block">
+            <span className="text-body-xs text-ink">Chọn file</span>
+            <div className="mt-2 rounded-md border border-dashed border-hairline bg-surface-doc p-6 text-center">
+              <input
+                type="file"
+                accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
+                onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+                className="block w-full text-body-sm text-body"
+              />
+              {selectedFile && (
+                <p className="mt-2 text-caption-sm text-mute">
+                  Đã chọn: <span className="text-ink font-medium">{selectedFile.name}</span>
+                </p>
+              )}
+            </div>
+          </label>
 
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-        <p className="font-semibold">Trạng thái: {flowState.toUpperCase()}</p>
-        <p className="mt-1">{message}</p>
-        {receiptId ? <p className="mt-1">Receipt ID: {receiptId}</p> : null}
-      </div>
+          <Button type="submit" variant="primary" disabled={!canSubmit}>
+            {flowState === "uploading"
+              ? "Đang upload..."
+              : flowState === "processing"
+                ? "Đang xử lý OCR..."
+                : "Upload hóa đơn"}
+          </Button>
+        </form>
+      </Card>
+
+      <CalloutBanner severity={severity} title={`Trạng thái: ${flowState.toUpperCase()}`}>
+        {message}
+        {receiptId ? ` (Receipt ID: ${receiptId})` : null}
+      </CalloutBanner>
 
       {flowState === "failed" ? (
-        <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          <p className="font-semibold">Không sẵn sàng review từ OCR</p>
-          <p>
+        <Card>
+          <p className="text-body-strong text-ink mb-2">
+            Không sẵn sàng review từ OCR
+          </p>
+          <p className="text-body-sm text-body">
             Bạn có thể{" "}
-            <Link href="/transactions/new" className="font-semibold underline">
+            <Link
+              href="/transactions/new"
+              className="text-link-teal font-semibold hover:underline"
+            >
               nhập giao dịch thủ công
             </Link>{" "}
             hoặc thử upload lại.
           </p>
-        </div>
+        </Card>
       ) : null}
-    </section>
+    </div>
   );
 }

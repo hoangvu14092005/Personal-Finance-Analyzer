@@ -1,22 +1,193 @@
 @import "tailwindcss";
 
-:root {
-  --background: #f6f8fb;
-  --foreground: #0f172a;
-}
+/* ===========================================================
+ * Design tokens — PostHog-inspired system (DESIGN.md, Phase 8).
+ * Cream canvas + yellow CTA + IBM Plex Sans + hairline borders.
+ * =========================================================== */
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Surfaces */
+  --color-canvas: #eeefe9;
+  --color-surface-soft: #e5e7e0;
+  --color-surface-card: #ffffff;
+  --color-surface-doc: #fcfcfa;
+  --color-surface-dark: #23251d;
+
+  /* Ink / text */
+  --color-ink: #23251d;
+  --color-body: #4d4f46;
+  --color-charcoal: #33342d;
+  --color-mute: #6c6e63;
+  --color-ash: #9b9c92;
+  --color-stone: #b6b7af;
+  --color-hairline: #bfc1b7;
+  --color-hairline-soft: #dcdfd2;
+  --color-on-dark: #ffffff;
+
+  /* Primary (yellow-orange) */
+  --color-primary: #f7a501;
+  --color-primary-pressed: #dd9001;
+  --color-primary-active: #b17816;
+  --color-primary-on: #23251d;
+
+  /* Semantic */
+  --color-link-blue: #1d4ed8;
+  --color-link-teal: #1078a3;
+  --color-accent-blue: #2c84e0;
+  --color-accent-blue-soft: #dceaf6;
+  --color-accent-red: #cd4239;
+  --color-accent-red-soft: #f7d6d3;
+  --color-accent-green: #2c8c66;
+  --color-accent-green-soft: #d9eddf;
+  --color-accent-purple: #7c44a6;
+  --color-accent-purple-soft: #e7d8ee;
+
+  /* Fonts */
+  --font-sans: var(--font-ibm-plex), "IBM Plex Sans", "Inter", system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), "JetBrains Mono", ui-monospace, monospace;
+
+  /* Radii */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* Spacing (extends default) */
+  --spacing-section: 80px;
+
+  /* Shadows - minimal (design spec says flat cards) */
+  --shadow-none: 0 0 #0000;
 }
 
-body {
-  background:
-    radial-gradient(circle at top left, #d9f2ef 0%, transparent 45%),
-    radial-gradient(circle at bottom right, #e8f0ff 0%, transparent 40%),
-    var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), sans-serif;
+/* ===========================================================
+ * Base layer — reset + body defaults.
+ * =========================================================== */
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-body);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--color-ink);
+    font-weight: 700;
+  }
+
+  /* Minimal focus ring matching design.focus-ring */
+  :focus-visible {
+    outline: 2px solid rgb(59 130 246 / 0.5);
+    outline-offset: 2px;
+  }
+}
+
+/* ===========================================================
+ * Typography utility classes (DESIGN.md typography scale).
+ * =========================================================== */
+
+@layer utilities {
+  .text-display-xl {
+    font-size: 36px;
+    line-height: 1.5;
+    font-weight: 700;
+  }
+  .text-display-lg {
+    font-size: 24px;
+    line-height: 1.33;
+    font-weight: 800;
+    letter-spacing: -0.6px;
+  }
+  .text-heading-lg {
+    font-size: 21px;
+    line-height: 1.4;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+  .text-heading-md {
+    font-size: 20px;
+    line-height: 1.4;
+    font-weight: 700;
+  }
+  .text-heading-sm {
+    font-size: 18px;
+    line-height: 1.5;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .text-heading-sm-mixed {
+    font-size: 18px;
+    line-height: 1.56;
+    font-weight: 600;
+  }
+  .text-body-md {
+    font-size: 16px;
+    line-height: 1.5;
+    font-weight: 400;
+  }
+  .text-body-strong {
+    font-size: 16px;
+    line-height: 1.5;
+    font-weight: 600;
+  }
+  .text-body-sm {
+    font-size: 15px;
+    line-height: 1.71;
+    font-weight: 400;
+  }
+  .text-body-xs {
+    font-size: 14px;
+    line-height: 1.43;
+    font-weight: 500;
+  }
+  .text-caption-md {
+    font-size: 14px;
+    line-height: 1.71;
+    font-weight: 700;
+  }
+  .text-caption-sm {
+    font-size: 13px;
+    line-height: 1.5;
+    font-weight: 500;
+  }
+  .text-caption-xs {
+    font-size: 12px;
+    line-height: 1.33;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .text-utility-xs {
+    font-size: 12px;
+    line-height: 1.33;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .text-button-md {
+    font-size: 14px;
+    line-height: 1.5;
+    font-weight: 700;
+  }
+  .text-button-sm {
+    font-size: 13px;
+    line-height: 1;
+    font-weight: 500;
+  }
+}
+
+/* Mobile responsive typography */
+@media (max-width: 768px) {
+  .text-display-xl {
+    font-size: 28px;
+  }
+  .text-display-lg {
+    font-size: 22px;
+  }
 }

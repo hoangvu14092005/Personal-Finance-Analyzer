@@ -1,21 +1,26 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
+import { IBM_Plex_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { Nav } from "@/components/layout/Nav";
+import { Footer } from "@/components/layout/Footer";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+const ibmPlex = IBM_Plex_Sans({
+  weight: ["400", "500", "600", "700"],
+  subsets: ["latin", "vietnamese"],
+  variable: "--font-ibm-plex",
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const jetbrainsMono = JetBrains_Mono({
+  weight: ["400", "500"],
   subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
   title: "Personal Finance Analyzer",
-  description: "Frontend shell for Personal Finance Analyzer",
+  description: "Quản lý chi tiêu thông minh với AI",
 };
 
 export default function RootLayout({
@@ -24,59 +29,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="vi">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${ibmPlex.variable} ${jetbrainsMono.variable} antialiased bg-canvas text-body`}
       >
-        <div className="min-h-screen">
-          <header className="border-b border-slate-200 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60">
-            <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-4">
-              <Link href="/" className="text-lg font-semibold tracking-tight text-slate-900">
-                Personal Finance Analyzer
-              </Link>
-              <nav className="flex items-center gap-4 text-sm text-slate-600">
-                <Link href="/" className="hover:text-slate-900">
-                  Home
-                </Link>
-                <Link href="/health" className="hover:text-slate-900">
-                  Health
-                </Link>
-                <Link href="/login" className="hover:text-slate-900">
-                  Login
-                </Link>
-                <Link href="/register" className="hover:text-slate-900">
-                  Register
-                </Link>
-                <Link href="/dashboard" className="hover:text-slate-900">
-                  Dashboard
-                </Link>
-                <Link href="/receipts/upload" className="hover:text-slate-900">
-                  Upload
-                </Link>
-                <Link href="/transactions" className="hover:text-slate-900">
-                  Transactions
-                </Link>
-                <Link href="/transactions/new" className="hover:text-slate-900">
-                  New Entry
-                </Link>
-                <Link href="/budgets" className="hover:text-slate-900">
-                  Budgets
-                </Link>
-                <Link href="/chat" className="hover:text-slate-900">
-                  💬 Trợ lý
-                </Link>
-              </nav>
-            </div>
-          </header>
-
-          <main className="mx-auto w-full max-w-5xl px-6 py-10">{children}</main>
-
-          <footer className="border-t border-slate-200 bg-white/70">
-            <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-4 text-xs text-slate-500">
-              <span>Phase 0 Foundation</span>
-              <span>Next.js 15 + Tailwind</span>
-            </div>
-          </footer>
+        <div className="min-h-screen flex flex-col">
+          <Nav />
+          <main className="flex-1 mx-auto w-full max-w-6xl px-6 py-10">
+            {children}
+          </main>
+          <Footer />
         </div>
       </body>
     </html>

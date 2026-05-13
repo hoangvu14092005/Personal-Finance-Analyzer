@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { apiBaseUrl } from "@/lib/config";
+import { CalloutBanner, Card, DisplayLg } from "@/components/ui";
 
 type HealthState = {
   status: "idle" | "loading" | "online" | "offline";
@@ -13,7 +14,7 @@ type HealthState = {
 export default function HealthPage() {
   const [healthState, setHealthState] = useState<HealthState>({
     status: "idle",
-    message: "Chua thuc hien kiem tra API.",
+    message: "Chưa thực hiện kiểm tra API.",
   });
 
   const endpoint = useMemo(() => `${apiBaseUrl}/health`, []);
@@ -22,7 +23,7 @@ export default function HealthPage() {
     let isCancelled = false;
 
     const probe = async () => {
-      setHealthState({ status: "loading", message: "Dang kiem tra ket noi API..." });
+      setHealthState({ status: "loading", message: "Đang kiểm tra kết nối API..." });
       const startedAt = performance.now();
 
       try {
@@ -45,7 +46,7 @@ export default function HealthPage() {
 
         setHealthState({
           status: "online",
-          message: `API ${body.service ?? "unknown"} tra ve status=${body.status ?? "unknown"}.`,
+          message: `API ${body.service ?? "unknown"} trả về status=${body.status ?? "unknown"}.`,
           latencyMs: elapsed,
         });
       } catch (error) {
@@ -56,7 +57,7 @@ export default function HealthPage() {
         const message = error instanceof Error ? error.message : "Unknown error";
         setHealthState({
           status: "offline",
-          message: `Khong the ket noi API: ${message}`,
+          message: `Không thể kết nối API: ${message}`,
         });
       }
     };
@@ -68,12 +69,12 @@ export default function HealthPage() {
     };
   }, [endpoint]);
 
-  const cardClasses =
+  const severity: "info" | "success" | "warning" =
     healthState.status === "online"
-      ? "border-emerald-200 bg-emerald-50"
+      ? "success"
       : healthState.status === "offline"
-        ? "border-rose-200 bg-rose-50"
-        : "border-slate-200 bg-slate-50";
+        ? "warning"
+        : "info";
 
   const title =
     healthState.status === "online"
@@ -83,21 +84,27 @@ export default function HealthPage() {
         : "Status: CHECKING";
 
   return (
-    <section className="space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-        Frontend Health Check
-      </h1>
+    <div className="space-y-6">
+      <DisplayLg>Frontend Health Check</DisplayLg>
 
-      <div className={`rounded-xl border p-5 ${cardClasses}`}>
-        <p className="text-sm font-semibold text-slate-900">{title}</p>
-        <p className="mt-2 text-sm text-slate-700">{healthState.message}</p>
-        <p className="mt-2 text-xs text-slate-600">Endpoint: {endpoint}</p>
-        {healthState.latencyMs !== undefined ? (
-          <p className="mt-1 text-xs text-slate-600">
-            Latency: {healthState.latencyMs}ms
-          </p>
-        ) : null}
-      </div>
-    </section>
+      <CalloutBanner severity={severity} title={title}>
+        {healthState.message}
+      </CalloutBanner>
+
+      <Card variant="doc">
+        <dl className="space-y-2 text-body-sm">
+          <div className="flex gap-2">
+            <dt className="text-mute min-w-24">Endpoint:</dt>
+            <dd className="text-ink font-mono">{endpoint}</dd>
+          </div>
+          {healthState.latencyMs !== undefined ? (
+            <div className="flex gap-2">
+              <dt className="text-mute min-w-24">Latency:</dt>
+              <dd className="text-ink">{healthState.latencyMs}ms</dd>
+            </div>
+          ) : null}
+        </dl>
+      </Card>
+    </div>
   );
 }

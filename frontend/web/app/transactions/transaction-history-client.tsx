@@ -12,6 +12,13 @@ import {
   deleteTransaction,
   listTransactions,
 } from "@/lib/transactions-api";
+import {
+  Button,
+  CalloutBanner,
+  Card,
+  DisplayLg,
+  Input,
+} from "@/components/ui";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -64,7 +71,6 @@ export function TransactionHistoryClient() {
     createdId ? `Đã lưu giao dịch #${createdId}.` : null,
   );
 
-  // Auth gate: redirect về login nếu chưa đăng nhập.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -147,186 +153,178 @@ export function TransactionHistoryClient() {
 
   if (!authReady) {
     return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-8">
-        <p className="text-sm text-slate-600">Đang xác thực phiên đăng nhập...</p>
-      </section>
+      <Card>
+        <p className="text-body-sm text-mute">Đang xác thực phiên đăng nhập...</p>
+      </Card>
     );
   }
 
   return (
-    <section className="space-y-6">
-      <header className="flex items-end justify-between gap-4">
+    <div className="space-y-6">
+      <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Lịch sử giao dịch</h1>
-          <p className="text-sm text-slate-600">
+          <DisplayLg>Lịch sử giao dịch</DisplayLg>
+          <p className="text-body-sm text-body mt-1">
             Xem, lọc và quản lý giao dịch đã lưu.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link
-            href="/transactions/new"
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-          >
-            Nhập tay
+          <Link href="/transactions/new">
+            <Button variant="primary" size="sm">Nhập tay</Button>
           </Link>
-          <Link
-            href="/receipts/upload"
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-          >
-            Upload hóa đơn
+          <Link href="/receipts/upload">
+            <Button variant="secondary" size="sm">Upload hóa đơn</Button>
           </Link>
         </div>
       </header>
 
-      <form
-        onSubmit={onApplyFilters}
-        className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-4"
-      >
-        <label className="text-sm font-medium text-slate-700">
-          Từ ngày
-          <input
-            type="date"
-            value={filters.startDate}
-            onChange={(event) =>
-              setFilters((prev) => ({ ...prev, startDate: event.target.value }))
-            }
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="text-sm font-medium text-slate-700">
-          Đến ngày
-          <input
-            type="date"
-            value={filters.endDate}
-            onChange={(event) =>
-              setFilters((prev) => ({ ...prev, endDate: event.target.value }))
-            }
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="text-sm font-medium text-slate-700 md:col-span-2">
-          Tìm theo merchant
-          <input
-            type="text"
-            placeholder="VD: Highlands, Pho 24..."
-            value={filters.merchant}
-            onChange={(event) =>
-              setFilters((prev) => ({ ...prev, merchant: event.target.value }))
-            }
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-        </label>
-        <div className="flex items-center gap-2 md:col-span-4">
-          <button
-            type="submit"
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-          >
-            Áp dụng
-          </button>
-          <button
-            type="button"
-            onClick={onResetFilters}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-          >
-            Đặt lại
-          </button>
-        </div>
-      </form>
+      <Card>
+        <form onSubmit={onApplyFilters} className="grid gap-4 md:grid-cols-4">
+          <label className="text-body-xs text-ink">
+            Từ ngày
+            <Input
+              type="date"
+              value={filters.startDate}
+              onChange={(event) =>
+                setFilters((prev) => ({ ...prev, startDate: event.target.value }))
+              }
+              className="mt-1.5"
+            />
+          </label>
+          <label className="text-body-xs text-ink">
+            Đến ngày
+            <Input
+              type="date"
+              value={filters.endDate}
+              onChange={(event) =>
+                setFilters((prev) => ({ ...prev, endDate: event.target.value }))
+              }
+              className="mt-1.5"
+            />
+          </label>
+          <label className="text-body-xs text-ink md:col-span-2">
+            Tìm theo merchant
+            <Input
+              type="text"
+              placeholder="VD: Highland, Grab, Coop..."
+              value={filters.merchant}
+              onChange={(event) =>
+                setFilters((prev) => ({ ...prev, merchant: event.target.value }))
+              }
+              className="mt-1.5"
+            />
+          </label>
+          <div className="flex items-center gap-2 md:col-span-4">
+            <Button type="submit" variant="primary" size="sm">
+              Áp dụng
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={onResetFilters}
+            >
+              Đặt lại
+            </Button>
+          </div>
+        </form>
+      </Card>
 
       {statusMessage ? (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          {statusMessage}
-        </div>
+        <CalloutBanner severity="success">{statusMessage}</CalloutBanner>
       ) : null}
       {errorMessage ? (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-          {errorMessage}
-        </div>
+        <CalloutBanner severity="warning">{errorMessage}</CalloutBanner>
       ) : null}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <Card className="p-0 overflow-hidden">
         {isLoading ? (
-          <p className="p-6 text-sm text-slate-600">Đang tải giao dịch...</p>
+          <p className="p-6 text-body-sm text-mute">Đang tải giao dịch...</p>
         ) : items && items.length > 0 ? (
-          <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-4 py-3">Ngày</th>
-                <th className="px-4 py-3">Merchant</th>
-                <th className="px-4 py-3 text-right">Số tiền</th>
-                <th className="px-4 py-3">Ghi chú</th>
-                <th className="px-4 py-3 text-right">Hành động</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {items.map((transaction) => (
-                <tr key={transaction.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-mono text-xs text-slate-700">
-                    {transaction.transaction_date}
-                  </td>
-                  <td className="px-4 py-3 text-slate-900">
-                    {transaction.merchant_name ?? (
-                      <span className="text-slate-400">Không có</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right font-semibold text-slate-900">
-                    {formatAmount(transaction.amount, transaction.currency)}
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {transaction.note ?? <span className="text-slate-400">—</span>}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => onDelete(transaction.id)}
-                      disabled={deletingId === transaction.id}
-                      className="rounded-md border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {deletingId === transaction.id ? "Đang xóa..." : "Xóa"}
-                    </button>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-body-sm">
+              <thead className="border-b border-hairline bg-surface-soft text-utility-xs text-body">
+                <tr>
+                  <th className="px-4 py-3">Ngày</th>
+                  <th className="px-4 py-3">Merchant</th>
+                  <th className="px-4 py-3 text-right">Số tiền</th>
+                  <th className="px-4 py-3">Ghi chú</th>
+                  <th className="px-4 py-3 text-right">Hành động</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-hairline-soft">
+                {items.map((transaction) => (
+                  <tr key={transaction.id} className="hover:bg-surface-soft/50">
+                    <td className="px-4 py-3 font-mono text-caption-sm text-body">
+                      {transaction.transaction_date}
+                    </td>
+                    <td className="px-4 py-3 text-ink">
+                      {transaction.merchant_name ?? (
+                        <span className="text-ash">Không có</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-ink">
+                      {formatAmount(transaction.amount, transaction.currency)}
+                    </td>
+                    <td className="px-4 py-3 text-body">
+                      {transaction.note ?? <span className="text-ash">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        onClick={() => onDelete(transaction.id)}
+                        disabled={deletingId === transaction.id}
+                      >
+                        {deletingId === transaction.id ? "Đang xóa..." : "Xóa"}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <div className="space-y-2 p-8 text-center">
-            <p className="text-sm font-semibold text-slate-700">
+            <p className="text-body-strong text-ink">
               Chưa có giao dịch nào khớp với bộ lọc.
             </p>
-            <p className="text-xs text-slate-500">
+            <p className="text-caption-sm text-mute">
               Thử upload hóa đơn ở mục Upload hoặc đặt lại bộ lọc.
             </p>
           </div>
         )}
-      </div>
+      </Card>
 
       {meta && meta.total > 0 ? (
-        <div className="flex items-center justify-between text-sm text-slate-600">
+        <div className="flex items-center justify-between text-body-sm text-body">
           <p>
-            Trang <span className="font-semibold">{meta.page}</span> / {totalPages} ·
-            Tổng <span className="font-semibold">{meta.total}</span> giao dịch
+            Trang <span className="font-semibold text-ink">{meta.page}</span> / {totalPages} ·
+            Tổng <span className="font-semibold text-ink">{meta.total}</span> giao dịch
           </p>
           <div className="flex items-center gap-2">
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={() => setPage((prev) => Math.max(1, prev - 1))}
               disabled={meta.page <= 1 || isLoading}
-              className="rounded-md border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Trang trước
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={() => setPage((prev) => prev + 1)}
               disabled={meta.page >= totalPages || isLoading}
-              className="rounded-md border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Trang sau
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}
-    </section>
+    </div>
   );
 }

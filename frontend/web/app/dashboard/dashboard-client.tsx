@@ -68,11 +68,11 @@ function formatDelta(deltaAmount: string, deltaPercent: number | null): {
 } {
   const numeric = Number(deltaAmount);
   if (!Number.isFinite(numeric) || numeric === 0) {
-    return { label: "Không đổi", color: "text-slate-500", arrow: "→" };
+    return { label: "Không đổi", color: "text-mute", arrow: "→" };
   }
   // Tăng chi tiêu = đỏ (xấu), giảm = xanh (tốt).
   const isUp = numeric > 0;
-  const color = isUp ? "text-rose-600" : "text-emerald-600";
+  const color = isUp ? "text-accent-red" : "text-accent-green";
   const arrow = isUp ? "↑" : "↓";
   const sign = isUp ? "+" : "−";
   const absVnd = formatVnd(String(Math.abs(numeric)));
@@ -207,8 +207,8 @@ export function DashboardClient() {
   // Auth chưa xong: render placeholder.
   if (!authReady) {
     return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-8">
-        <p className="text-sm text-slate-600">Đang xác thực phiên đăng nhập...</p>
+      <section className="rounded-md border border-hairline bg-surface-card p-8">
+        <p className="text-sm text-body">Đang xác thực phiên đăng nhập...</p>
       </section>
     );
   }
@@ -216,17 +216,17 @@ export function DashboardClient() {
   return (
     <div className="space-y-6">
       {/* Header + filter tabs */}
-      <header className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <header className="space-y-4 rounded-md border border-hairline bg-surface-card p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-            <p className="text-sm text-slate-500">
+            <h1 className="text-2xl font-bold text-ink">Dashboard</h1>
+            <p className="text-sm text-mute">
               Tổng quan chi tiêu và so sánh kỳ trước
             </p>
           </div>
           <Link
             href="/transactions/new"
-            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            className="rounded-lg border border-hairline bg-surface-card px-3 py-1.5 text-sm font-medium text-body hover:bg-surface-soft"
           >
             Thêm giao dịch
           </Link>
@@ -243,8 +243,8 @@ export function DashboardClient() {
                 className={
                   "rounded-full px-3 py-1.5 text-sm font-medium transition " +
                   (active
-                    ? "bg-slate-900 text-white"
-                    : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100")
+                    ? "bg-ink text-white"
+                    : "border border-hairline bg-surface-card text-body hover:bg-surface-soft")
                 }
                 aria-pressed={active}
               >
@@ -260,7 +260,7 @@ export function DashboardClient() {
             onSubmit={onSubmitCustom}
             aria-label="Khoảng tùy chỉnh"
           >
-            <label className="flex flex-col text-xs font-medium text-slate-600">
+            <label className="flex flex-col text-xs font-medium text-body">
               Từ ngày
               <input
                 type="date"
@@ -268,10 +268,10 @@ export function DashboardClient() {
                 onChange={(e) =>
                   setFilters((prev) => ({ ...prev, startDate: e.target.value }))
                 }
-                className="mt-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                className="mt-1 rounded-lg border border-hairline px-3 py-1.5 text-sm"
               />
             </label>
-            <label className="flex flex-col text-xs font-medium text-slate-600">
+            <label className="flex flex-col text-xs font-medium text-body">
               Đến ngày
               <input
                 type="date"
@@ -279,12 +279,12 @@ export function DashboardClient() {
                 onChange={(e) =>
                   setFilters((prev) => ({ ...prev, endDate: e.target.value }))
                 }
-                className="mt-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                className="mt-1 rounded-lg border border-hairline px-3 py-1.5 text-sm"
               />
             </label>
             <button
               type="submit"
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white hover:bg-charcoal"
             >
               Áp dụng
             </button>
@@ -295,14 +295,14 @@ export function DashboardClient() {
       {/* Error banner */}
       {errorMessage && (
         <div
-          className="flex items-center justify-between rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
+          className="flex items-center justify-between rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-accent-red"
           role="alert"
         >
           <span>{errorMessage}</span>
           <button
             type="button"
             onClick={() => void refetch()}
-            className="rounded-md border border-rose-300 bg-white px-3 py-1 text-xs font-medium text-rose-700 hover:bg-rose-100"
+            className="rounded-md border border-rose-300 bg-surface-card px-3 py-1 text-xs font-medium text-accent-red hover:bg-accent-red-soft"
           >
             Thử lại
           </button>
@@ -332,36 +332,36 @@ function DashboardSkeleton() {
         {[1, 2, 3].map((i) => (
           <div
             key={i}
-            className="h-28 animate-pulse rounded-2xl border border-slate-200 bg-slate-100"
+            className="h-28 animate-pulse rounded-md border border-hairline bg-surface-soft"
           />
         ))}
       </div>
-      <div className="h-56 animate-pulse rounded-2xl border border-slate-200 bg-slate-100" />
-      <div className="h-72 animate-pulse rounded-2xl border border-slate-200 bg-slate-100" />
+      <div className="h-56 animate-pulse rounded-md border border-hairline bg-surface-soft" />
+      <div className="h-72 animate-pulse rounded-md border border-hairline bg-surface-soft" />
     </div>
   );
 }
 
 function EmptyState() {
   return (
-    <section className="space-y-3 rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
-      <h2 className="text-lg font-semibold text-slate-900">
+    <section className="space-y-3 rounded-md border border-dashed border-hairline bg-surface-card p-10 text-center">
+      <h2 className="text-lg font-semibold text-ink">
         Chưa có giao dịch trong kỳ này
       </h2>
-      <p className="mx-auto max-w-md text-sm text-slate-500">
+      <p className="mx-auto max-w-md text-sm text-mute">
         Bắt đầu thêm giao dịch hoặc upload biên lai để dashboard có dữ liệu phân
         tích.
       </p>
       <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
         <Link
           href="/transactions/new"
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white hover:bg-charcoal"
         >
           Thêm giao dịch thủ công
         </Link>
         <Link
           href="/receipts/upload"
-          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          className="rounded-lg border border-hairline bg-surface-card px-4 py-2 text-sm font-medium text-body hover:bg-surface-soft"
         >
           Upload biên lai
         </Link>
@@ -405,12 +405,12 @@ function DashboardContent({
       </div>
 
       {/* Previous period comparison block */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="rounded-md border border-hairline bg-surface-card p-6">
         <header className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-slate-900">
+          <h2 className="text-base font-semibold text-ink">
             So sánh kỳ trước
           </h2>
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-mute">
             {formatDate(data.previous_range.start)} → {formatDate(data.previous_range.end)}
           </span>
         </header>
@@ -418,12 +418,12 @@ function DashboardContent({
       </section>
 
       {/* Category chart */}
-      <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="space-y-3 rounded-md border border-hairline bg-surface-card p-6">
         <header className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-slate-900">
+          <h2 className="text-base font-semibold text-ink">
             Phân bổ theo danh mục
           </h2>
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-mute">
             {data.top_categories.length} danh mục
           </span>
         </header>
@@ -440,12 +440,12 @@ function DashboardContent({
       />
 
       {/* Top categories list */}
-      <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="space-y-3 rounded-md border border-hairline bg-surface-card p-6">
         <header className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-slate-900">
+          <h2 className="text-base font-semibold text-ink">
             Top danh mục chi tiêu
           </h2>
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-mute">
             {data.top_categories.length} danh mục
           </span>
         </header>
@@ -453,23 +453,23 @@ function DashboardContent({
           {data.top_categories.map((cat) => (
             <li key={`${cat.category_id ?? "uncat"}-${cat.name}`} className="space-y-1">
               <div className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2 font-medium text-slate-800">
+                <span className="flex items-center gap-2 font-medium text-charcoal">
                   <span
                     className="inline-block h-3 w-3 rounded-full"
                     style={{ backgroundColor: cat.color ?? "#94a3b8" }}
                     aria-hidden="true"
                   />
                   {cat.name}
-                  <span className="text-xs font-normal text-slate-500">
+                  <span className="text-xs font-normal text-mute">
                     ({cat.transaction_count} giao dịch)
                   </span>
                 </span>
-                <span className="font-medium text-slate-900">
+                <span className="font-medium text-ink">
                   {formatVnd(cat.total_amount)} VND ·{" "}
-                  <span className="text-slate-500">{cat.percentage.toFixed(1)}%</span>
+                  <span className="text-mute">{cat.percentage.toFixed(1)}%</span>
                 </span>
               </div>
-              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-2 overflow-hidden rounded-full bg-surface-soft">
                 <div
                   className="h-full rounded-full"
                   style={{
@@ -484,31 +484,31 @@ function DashboardContent({
       </section>
 
       {/* Recent transactions */}
-      <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="space-y-3 rounded-md border border-hairline bg-surface-card p-6">
         <header className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-slate-900">
+          <h2 className="text-base font-semibold text-ink">
             Giao dịch gần đây
           </h2>
           <Link
             href="/transactions"
-            className="text-sm font-medium text-slate-700 hover:text-slate-900"
+            className="text-sm font-medium text-body hover:text-ink"
           >
             Xem tất cả →
           </Link>
         </header>
-        <ul className="divide-y divide-slate-100">
+        <ul className="divide-y divide-hairline-soft">
           {data.recent_transactions.map((tx) => (
             <li key={tx.id} className="flex items-center justify-between py-3 text-sm">
               <div>
-                <p className="font-medium text-slate-900">
+                <p className="font-medium text-ink">
                   {tx.merchant_name ?? "(Không có merchant)"}
                 </p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-mute">
                   {formatDate(tx.transaction_date)}
                   {tx.category_name ? ` · ${tx.category_name}` : ""}
                 </p>
               </div>
-              <div className="font-medium text-slate-900">
+              <div className="font-medium text-ink">
                 {formatAmount(tx.amount, tx.currency)}
               </div>
             </li>
@@ -529,12 +529,12 @@ function SummaryCard({
   hint?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+    <div className="rounded-md border border-hairline bg-surface-card p-5">
+      <p className="text-xs font-medium uppercase tracking-wide text-mute">
         {label}
       </p>
-      <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
-      {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+      <p className="mt-2 text-2xl font-bold text-ink">{value}</p>
+      {hint && <p className="mt-1 text-xs text-mute">{hint}</p>}
     </div>
   );
 }
@@ -557,7 +557,7 @@ function PreviousPeriodCompare({ data }: { data: DashboardSummary }) {
           label="Kỳ này"
           amount={current}
           width={currentWidth}
-          color="bg-slate-900"
+          color="bg-ink"
           count={data.current.transaction_count}
         />
         <CompareBar
@@ -570,8 +570,8 @@ function PreviousPeriodCompare({ data }: { data: DashboardSummary }) {
       </div>
 
       {/* Tổng hợp delta */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-4 py-3 text-sm">
-        <span className="text-slate-600">Chênh lệch</span>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-soft/60 px-4 py-3 text-sm">
+        <span className="text-body">Chênh lệch</span>
         <span className={`font-semibold ${delta.color}`}>
           {delta.arrow} {delta.label}
         </span>
@@ -596,13 +596,13 @@ function CompareBar({
   return (
     <div>
       <div className="mb-1 flex items-center justify-between text-sm">
-        <span className="font-medium text-slate-700">{label}</span>
-        <span className="text-slate-900">
+        <span className="font-medium text-body">{label}</span>
+        <span className="text-ink">
           {formatVnd(String(amount))} VND
-          <span className="ml-2 text-xs text-slate-500">({count} GD)</span>
+          <span className="ml-2 text-xs text-mute">({count} GD)</span>
         </span>
       </div>
-      <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+      <div className="h-3 overflow-hidden rounded-full bg-surface-soft">
         <div
           className={`h-full rounded-full ${color}`}
           style={{ width: `${Math.min(100, Math.max(0, width))}%` }}
@@ -615,12 +615,12 @@ function CompareBar({
 function budgetStatusBadgeClass(status: BudgetUsage["status"]): string {
   switch (status) {
     case "exceeded":
-      return "bg-rose-100 text-rose-800 border-rose-200";
+      return "bg-accent-red-soft text-rose-800 border-rose-200";
     case "warning":
-      return "bg-amber-100 text-amber-800 border-amber-200";
+      return "bg-accent-purple-soft text-amber-800 border-amber-200";
     case "safe":
     default:
-      return "bg-emerald-100 text-emerald-800 border-emerald-200";
+      return "bg-accent-green-soft text-emerald-800 border-emerald-200";
   }
 }
 
@@ -639,12 +639,12 @@ function budgetStatusLabel(status: BudgetUsage["status"]): string {
 function budgetProgressColor(status: BudgetUsage["status"]): string {
   switch (status) {
     case "exceeded":
-      return "bg-rose-500";
+      return "bg-accent-red";
     case "warning":
-      return "bg-amber-500";
+      return "bg-accent-purple";
     case "safe":
     default:
-      return "bg-emerald-500";
+      return "bg-accent-green";
   }
 }
 
@@ -658,16 +658,16 @@ function BudgetsSection({
   // Empty state: chưa set budget nào → CTA sang /budgets.
   if (usages.length === 0) {
     return (
-      <section className="space-y-2 rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-center">
-        <h2 className="text-base font-semibold text-slate-900">
+      <section className="space-y-2 rounded-md border border-dashed border-hairline bg-surface-card p-6 text-center">
+        <h2 className="text-base font-semibold text-ink">
           Ngân sách tháng {budgetPeriod}
         </h2>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-mute">
           Bạn chưa đặt ngân sách nào cho tháng này.
         </p>
         <Link
           href="/budgets"
-          className="inline-block rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          className="inline-block rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white hover:bg-charcoal"
         >
           Đặt ngân sách
         </Link>
@@ -677,19 +677,19 @@ function BudgetsSection({
 
   // Backend đã sort theo percent_used DESC — giữ nguyên thứ tự này.
   return (
-    <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <section className="space-y-4 rounded-md border border-hairline bg-surface-card p-6">
       <header className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold text-slate-900">
+          <h2 className="text-base font-semibold text-ink">
             Ngân sách tháng {budgetPeriod}
           </h2>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-mute">
             Sắp xếp theo % sử dụng — danh mục sắp vượt lên đầu.
           </p>
         </div>
         <Link
           href="/budgets"
-          className="text-sm font-medium text-slate-700 hover:text-slate-900"
+          className="text-sm font-medium text-body hover:text-ink"
         >
           Quản lý →
         </Link>
@@ -701,7 +701,7 @@ function BudgetsSection({
           return (
             <li key={u.budget_id} className="space-y-1">
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span className="flex items-center gap-2 font-medium text-slate-800">
+                <span className="flex items-center gap-2 font-medium text-charcoal">
                   {u.category_color ? (
                     <span
                       aria-hidden
@@ -718,15 +718,15 @@ function BudgetsSection({
                     {budgetStatusLabel(u.status)}
                   </span>
                 </span>
-                <span className="text-slate-900">
+                <span className="text-ink">
                   {formatVnd(u.spent_amount)} /{" "}
-                  <span className="text-slate-500">{formatVnd(u.budget_amount)}</span>
-                  <span className="ml-2 text-xs font-medium text-slate-700">
+                  <span className="text-mute">{formatVnd(u.budget_amount)}</span>
+                  <span className="ml-2 text-xs font-medium text-body">
                     {u.percent_used.toFixed(0)}%
                   </span>
                 </span>
               </div>
-              <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-2 overflow-hidden rounded-full bg-surface-soft">
                 <div
                   className={`h-full rounded-full transition-all ${budgetProgressColor(
                     u.status,

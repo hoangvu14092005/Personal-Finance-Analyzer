@@ -8,13 +8,21 @@ import { getMe } from "@/lib/auth-api";
 import { Category, listCategories } from "@/lib/categories-api";
 import { DraftReview, getReceiptDraft } from "@/lib/receipts-api";
 import { createTransaction } from "@/lib/transactions-api";
+import {
+  Button,
+  CalloutBanner,
+  Card,
+  DisplayLg,
+  Input,
+  Textarea,
+} from "@/components/ui";
 
 type ReviewFormState = {
   merchantName: string;
   amount: string;
   currency: string;
   transactionDate: string;
-  categoryId: string; // empty string = none
+  categoryId: string;
   note: string;
 };
 
@@ -48,7 +56,6 @@ export default function ReceiptReviewPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  // Next.js 15 dynamic route params là Promise; React 19 `use()` unwrap.
   const { id } = use(params);
   const receiptId = Number(id);
   const router = useRouter();
@@ -157,57 +164,63 @@ export default function ReceiptReviewPage({
 
   if (!authReady) {
     return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-8">
-        <p className="text-sm text-slate-600">Đang xác thực phiên đăng nhập...</p>
-      </section>
+      <Card>
+        <p className="text-body-sm text-mute">Đang xác thực phiên đăng nhập...</p>
+      </Card>
     );
   }
 
   if (isLoading) {
     return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-8">
-        <p className="text-sm text-slate-600">Đang tải dữ liệu OCR draft...</p>
-      </section>
+      <Card>
+        <p className="text-body-sm text-mute">Đang tải dữ liệu OCR draft...</p>
+      </Card>
     );
   }
 
   if (loadError) {
     return (
-      <section className="space-y-4 rounded-2xl border border-amber-200 bg-amber-50 p-8 text-amber-900">
-        <h1 className="text-xl font-semibold">Không tải được draft</h1>
-        <p className="text-sm">{loadError}</p>
-        <p className="text-sm">
-          Bạn có thể chờ OCR hoàn thành rồi tải lại trang, hoặc{" "}
+      <div className="max-w-2xl mx-auto space-y-4">
+        <CalloutBanner severity="warning" title="Không tải được draft">
+          {loadError}
+        </CalloutBanner>
+        <p className="text-body-sm text-body">
+          Bạn có thể chờ OCR hoàn thành rồi tải lại, hoặc{" "}
           <Link
             href="/transactions/new"
-            className="font-semibold text-amber-700 underline hover:text-amber-900"
+            className="text-link-teal font-semibold hover:underline"
           >
             nhập tay
           </Link>
           .
         </p>
-      </section>
+      </div>
     );
   }
 
+  const confidencePct =
+    draft?.confidence != null
+      ? `${(draft.confidence * 100).toFixed(0)}%`
+      : null;
+
   return (
-    <section className="space-y-6">
+    <div className="max-w-2xl mx-auto space-y-6">
       <header>
-        <h1 className="text-2xl font-bold text-slate-900">Review giao dịch từ OCR</h1>
-        <p className="text-sm text-slate-600">
+        <DisplayLg>Review giao dịch từ OCR</DisplayLg>
+        <p className="text-body-sm text-body mt-1">
           Receipt #{receiptId} · Provider: {draft?.provider ?? "-"}
-          {draft?.confidence !== null && draft?.confidence !== undefined ? (
+          {confidencePct ? (
             <>
               {" "}
               · Confidence:{" "}
               <span
                 className={
                   isLowConfidence
-                    ? "font-semibold text-amber-700"
-                    : "font-semibold text-emerald-700"
+                    ? "font-semibold text-accent-red"
+                    : "font-semibold text-accent-green"
                 }
               >
-                {(draft.confidence * 100).toFixed(0)}%
+                {confidencePct}
               </span>
             </>
           ) : null}
@@ -215,140 +228,134 @@ export default function ReceiptReviewPage({
       </header>
 
       {isLowConfidence ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <CalloutBanner severity="warning">
           OCR confidence thấp. Vui lòng kiểm tra kỹ các field trước khi lưu.
-        </div>
+        </CalloutBanner>
       ) : null}
 
-      <form
-        onSubmit={onSubmit}
-        className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2"
-      >
-        <label className="text-sm font-medium text-slate-700 md:col-span-2">
-          Merchant
-          <input
-            type="text"
-            value={form.merchantName}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, merchantName: event.target.value }))
-            }
-            placeholder="VD: Highlands Coffee"
-            className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm ${
-              isLowConfidence ? "border-amber-300" : "border-slate-300"
-            }`}
-          />
-        </label>
+      <Card>
+        <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-2">
+          <label className="text-body-xs text-ink md:col-span-2">
+            Merchant
+            <Input
+              type="text"
+              value={form.merchantName}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, merchantName: event.target.value }))
+              }
+              placeholder="VD: Highland Coffee"
+              className={`mt-1.5 ${
+                isLowConfidence ? "border-accent-red/50" : ""
+              }`}
+            />
+          </label>
 
-        <label className="text-sm font-medium text-slate-700">
-          Số tiền
-          <input
-            type="text"
-            inputMode="decimal"
-            required
-            value={form.amount}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, amount: event.target.value }))
-            }
-            placeholder="VD: 75000"
-            className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm ${
-              isLowConfidence ? "border-amber-300" : "border-slate-300"
-            }`}
-          />
-        </label>
+          <label className="text-body-xs text-ink">
+            Số tiền
+            <Input
+              type="text"
+              inputMode="decimal"
+              required
+              value={form.amount}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, amount: event.target.value }))
+              }
+              placeholder="VD: 75000"
+              className={`mt-1.5 ${
+                isLowConfidence ? "border-accent-red/50" : ""
+              }`}
+            />
+          </label>
 
-        <label className="text-sm font-medium text-slate-700">
-          Tiền tệ
-          <input
-            type="text"
-            value={form.currency}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, currency: event.target.value }))
-            }
-            maxLength={10}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-        </label>
+          <label className="text-body-xs text-ink">
+            Tiền tệ
+            <Input
+              type="text"
+              value={form.currency}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, currency: event.target.value }))
+              }
+              maxLength={10}
+              className="mt-1.5"
+            />
+          </label>
 
-        <label className="text-sm font-medium text-slate-700">
-          Ngày giao dịch
-          <input
-            type="date"
-            required
-            value={form.transactionDate}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, transactionDate: event.target.value }))
-            }
-            className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm ${
-              isLowConfidence ? "border-amber-300" : "border-slate-300"
-            }`}
-          />
-        </label>
+          <label className="text-body-xs text-ink">
+            Ngày giao dịch
+            <Input
+              type="date"
+              required
+              value={form.transactionDate}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, transactionDate: event.target.value }))
+              }
+              className={`mt-1.5 ${
+                isLowConfidence ? "border-accent-red/50" : ""
+              }`}
+            />
+          </label>
 
-        <label className="text-sm font-medium text-slate-700">
-          Danh mục
-          <select
-            value={form.categoryId}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, categoryId: event.target.value }))
-            }
-            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-          >
-            <option value="">— Chưa phân loại —</option>
-            {categories.map((category) => (
-              <option key={category.id} value={String(category.id)}>
-                {category.name}
-                {category.is_system ? "" : " (custom)"}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="text-body-xs text-ink">
+            Danh mục
+            <select
+              value={form.categoryId}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, categoryId: event.target.value }))
+              }
+              className="mt-1.5 w-full h-9 rounded-md border border-hairline bg-surface-card px-3 text-body-md text-ink focus:outline-none focus:border-accent-blue focus:ring-2 focus:ring-accent-blue/20"
+            >
+              <option value="">— Chưa phân loại —</option>
+              {categories.map((category) => (
+                <option key={category.id} value={String(category.id)}>
+                  {category.name}
+                  {category.is_system ? "" : " (custom)"}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label className="text-sm font-medium text-slate-700 md:col-span-2">
-          Ghi chú
-          <textarea
-            value={form.note}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, note: event.target.value }))
-            }
-            rows={3}
-            maxLength={1000}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-        </label>
+          <label className="text-body-xs text-ink md:col-span-2">
+            Ghi chú
+            <Textarea
+              value={form.note}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, note: event.target.value }))
+              }
+              rows={3}
+              maxLength={1000}
+              className="mt-1.5"
+            />
+          </label>
 
-        {submitError ? (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 md:col-span-2">
-            {submitError}
+          {submitError ? (
+            <div className="md:col-span-2">
+              <CalloutBanner severity="warning">{submitError}</CalloutBanner>
+            </div>
+          ) : null}
+
+          <div className="flex items-center gap-2 md:col-span-2">
+            <Button type="submit" variant="primary" disabled={submitting}>
+              {submitting ? "Đang lưu..." : "Lưu giao dịch"}
+            </Button>
+            <Link href="/receipts/upload">
+              <Button type="button" variant="secondary">
+                Hủy
+              </Button>
+            </Link>
           </div>
-        ) : null}
-
-        <div className="flex items-center gap-2 md:col-span-2">
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {submitting ? "Đang lưu..." : "Lưu giao dịch"}
-          </button>
-          <Link
-            href="/receipts/upload"
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-          >
-            Hủy
-          </Link>
-        </div>
-      </form>
+        </form>
+      </Card>
 
       {draft?.raw_text ? (
-        <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+        <details className="rounded-md border border-hairline bg-surface-dark p-4 text-body-sm text-on-dark">
           <summary className="cursor-pointer font-semibold">
             Xem text OCR gốc
           </summary>
-          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded bg-white p-3 text-xs">
+          <pre className="mt-3 overflow-x-auto whitespace-pre-wrap font-mono text-caption-sm text-on-dark/90">
             {draft.raw_text}
           </pre>
         </details>
       ) : null}
-    </section>
+    </div>
   );
 }

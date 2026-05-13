@@ -1,34 +1,83 @@
+import Link from "next/link";
+import { Button, Card, DisplayXl, Eyebrow, HeadingSmMixed } from "@/components/ui";
+
+const FEATURES = [
+  {
+    icon: "🧾",
+    title: "Upload hóa đơn",
+    description:
+      "Chụp hoặc tải ảnh hóa đơn, AI tự đọc thông tin và tạo giao dịch cho bạn.",
+  },
+  {
+    icon: "📊",
+    title: "Dashboard tổng quan",
+    description:
+      "Xem chi tiêu theo danh mục, so sánh kỳ trước, theo dõi ngân sách.",
+  },
+  {
+    icon: "💬",
+    title: "AI Trợ lý hỏi đáp",
+    description:
+      "Hỏi bất kỳ câu nào về chi tiêu bằng tiếng Việt tự nhiên.",
+  },
+];
+
 export default function Home() {
   return (
-    <section className="space-y-8">
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-        <p className="text-sm font-medium uppercase tracking-[0.15em] text-teal-700">
-          Phase 0.2
+    <div className="space-y-20">
+      {/* Hero */}
+      <section className="text-center pt-10 pb-6">
+        <Eyebrow className="mb-4">Quản lý tài chính cá nhân</Eyebrow>
+        <DisplayXl className="max-w-3xl mx-auto">
+          Quản lý chi tiêu thông minh cùng AI
+        </DisplayXl>
+        <p className="mt-6 max-w-2xl mx-auto text-body-md text-body">
+          Upload hóa đơn, theo dõi chi tiêu và hỏi đáp về tài chính cá nhân —
+          tất cả bằng tiếng Việt, tự nhiên và nhanh chóng.
         </p>
-        <h1 className="mt-3 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
-          Frontend Foundation Is Ready
-        </h1>
-        <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
-          This app is initialized with Next.js 15 App Router, TypeScript, and
-          Tailwind CSS using pnpm. It is the starting point for the Personal
-          Finance Analyzer UI.
-        </p>
-      </div>
+        <div className="mt-8 flex flex-wrap justify-center gap-3">
+          <Link href="/register">
+            <Button variant="primary">Bắt đầu miễn phí</Button>
+          </Link>
+          <Link href="/dashboard">
+            <Button variant="secondary">Xem demo</Button>
+          </Link>
+        </div>
+      </section>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <h2 className="text-sm font-semibold text-slate-900">Framework</h2>
-          <p className="mt-2 text-sm text-slate-600">Next.js 15 App Router</p>
+      {/* Features grid */}
+      <section>
+        <div className="text-center mb-10">
+          <Eyebrow className="mb-3">Tính năng chính</Eyebrow>
+          <h2 className="text-heading-lg text-ink">
+            3 cách giúp bạn quản lý chi tiêu tốt hơn
+          </h2>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <h2 className="text-sm font-semibold text-slate-900">Language</h2>
-          <p className="mt-2 text-sm text-slate-600">TypeScript enabled</p>
+        <div className="grid gap-4 md:grid-cols-3">
+          {FEATURES.map((feature) => (
+            <Card key={feature.title} variant="feature">
+              <div className="text-4xl mb-3" aria-hidden>
+                {feature.icon}
+              </div>
+              <HeadingSmMixed className="mb-2">{feature.title}</HeadingSmMixed>
+              <p className="text-body-sm text-body">{feature.description}</p>
+            </Card>
+          ))}
         </div>
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <h2 className="text-sm font-semibold text-slate-900">Styling</h2>
-          <p className="mt-2 text-sm text-slate-600">Tailwind CSS configured</p>
-        </div>
-      </div>
-    </section>
+      </section>
+
+      {/* CTA section */}
+      <section className="text-center py-10">
+        <h2 className="text-heading-lg text-ink mb-4">
+          Sẵn sàng kiểm soát chi tiêu?
+        </h2>
+        <p className="text-body-md text-body mb-6 max-w-xl mx-auto">
+          Tạo tài khoản miễn phí và bắt đầu upload hóa đơn đầu tiên chỉ trong 1 phút.
+        </p>
+        <Link href="/register">
+          <Button variant="primary">Tạo tài khoản miễn phí</Button>
+        </Link>
+      </section>
+    </div>
   );
 }

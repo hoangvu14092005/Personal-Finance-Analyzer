@@ -11,8 +11,6 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlmodel import Session
-
 from app.models.entities import Category, Transaction, User
 from app.services.chat.queries import (
     compare_periods,
@@ -23,6 +21,7 @@ from app.services.chat.queries import (
     query_spending_summary,
     search_transactions,
 )
+from sqlmodel import Session
 
 
 @pytest.fixture()

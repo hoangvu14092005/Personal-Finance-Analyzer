@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 import { login } from "@/lib/auth-api";
+import { Button, CalloutBanner, Card, DisplayLg, Input } from "@/components/ui";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -22,57 +23,69 @@ export default function LoginPage() {
       await login({ email, password });
       router.push("/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Dang nhap that bai");
+      setError(err instanceof Error ? err.message : "Đăng nhập thất bại");
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <section className="mx-auto max-w-md space-y-6 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-      <h1 className="text-2xl font-bold text-slate-900">Dang nhap</h1>
-      <p className="text-sm text-slate-600">Su dung tai khoan de vao dashboard.</p>
+    <div className="max-w-md mx-auto py-10">
+      <Card variant="product" className="space-y-6">
+        <div>
+          <DisplayLg>Đăng nhập</DisplayLg>
+          <p className="mt-2 text-body-sm text-body">
+            Sử dụng tài khoản để vào dashboard.
+          </p>
+        </div>
 
-      <form className="space-y-4" onSubmit={onSubmit}>
-        <label className="block space-y-1">
-          <span className="text-sm font-medium text-slate-700">Email</span>
-          <input
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-teal-500 focus:ring"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-        </label>
+        <form className="space-y-4" onSubmit={onSubmit}>
+          <label className="block space-y-1.5">
+            <span className="text-body-xs text-ink">Email</span>
+            <Input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+              placeholder="you@example.com"
+            />
+          </label>
 
-        <label className="block space-y-1">
-          <span className="text-sm font-medium text-slate-700">Mat khau</span>
-          <input
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-teal-500 focus:ring"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-          />
-        </label>
+          <label className="block space-y-1.5">
+            <span className="text-body-xs text-ink">Mật khẩu</span>
+            <Input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              placeholder="••••••••"
+            />
+          </label>
 
-        {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+          {error ? (
+            <CalloutBanner severity="warning">{error}</CalloutBanner>
+          ) : null}
 
-        <button
-          className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-          type="submit"
-          disabled={isSubmitting}
-        >
-          {isSubmitting ? "Dang xu ly..." : "Dang nhap"}
-        </button>
-      </form>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={isSubmitting}
+            className="w-full"
+          >
+            {isSubmitting ? "Đang xử lý..." : "Đăng nhập"}
+          </Button>
+        </form>
 
-      <p className="text-sm text-slate-600">
-        Chua co tai khoan?{" "}
-        <Link href="/register" className="font-semibold text-teal-700 hover:text-teal-900">
-          Dang ky
-        </Link>
-      </p>
-    </section>
+        <p className="text-body-sm text-body text-center">
+          Chưa có tài khoản?{" "}
+          <Link
+            href="/register"
+            className="text-link-teal font-semibold hover:underline"
+          >
+            Đăng ký
+          </Link>
+        </p>
+      </Card>
+    </div>
   );
 }

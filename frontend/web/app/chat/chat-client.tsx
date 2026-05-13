@@ -8,8 +8,8 @@ import {
   clearHistory,
   getHistory,
   sendMessage,
-  type ChatMessageItem,
 } from "@/lib/chat-api";
+import { Button, CalloutBanner, PillTab } from "@/components/ui";
 
 const SUGGESTED_QUESTIONS = [
   "Tổng chi tháng này",
@@ -36,7 +36,6 @@ export default function ChatClient() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auth gate
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -47,10 +46,11 @@ export default function ChatClient() {
         router.replace("/login?next=/chat");
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
-  // Load history
   useEffect(() => {
     if (!authReady) return;
     let cancelled = false;
@@ -67,15 +67,16 @@ export default function ChatClient() {
           }));
         setMessages(display);
       } catch {
-        // Ignore history load errors
+        // ignore
       } finally {
         if (!cancelled) setLoadingHistory(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [authReady]);
 
-  // Auto scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -89,7 +90,6 @@ export default function ChatClient() {
       setError(null);
       setStreaming(true);
 
-      // Add user message
       const userMsg: DisplayMessage = {
         id: `user-${Date.now()}`,
         role: "user",
@@ -117,9 +117,7 @@ export default function ChatClient() {
             return updated;
           });
         },
-        onToolCall: () => {
-          // Could show "đang tìm kiếm..." indicator
-        },
+        onToolCall: () => {},
         onDone: () => {
           setMessages((prev) => {
             const updated = [...prev];
@@ -138,7 +136,6 @@ export default function ChatClient() {
             const updated = [...prev];
             const last = updated[updated.length - 1];
             if (last && last.role === "assistant" && !last.content) {
-              // Remove empty assistant message on error
               return updated.slice(0, -1);
             }
             return updated;
@@ -168,7 +165,7 @@ export default function ChatClient() {
 
   if (!authReady) {
     return (
-      <div className="text-sm text-slate-500">
+      <div className="text-body-sm text-mute">
         Đang kiểm tra phiên đăng nhập…
       </div>
     );
@@ -177,12 +174,13 @@ export default function ChatClient() {
   return (
     <div className="mx-auto flex h-[calc(100vh-12rem)] max-w-2xl flex-col">
       {/* Header */}
-      <header className="flex items-center justify-between border-b border-slate-200 pb-3">
+      <header className="flex items-center justify-between border-b border-hairline-soft pb-4">
         <div>
-          <h1 className="text-lg font-semibold text-slate-900">
-            💬 Trợ lý chi tiêu
+          <h1 className="text-display-lg text-ink flex items-center gap-2">
+            <span aria-hidden>💬</span>
+            <span>Trợ lý chi tiêu</span>
           </h1>
-          <p className="text-xs text-slate-500">
+          <p className="text-body-sm text-body mt-1">
             Hỏi bất kỳ điều gì về chi tiêu của bạn
           </p>
         </div>
@@ -190,7 +188,7 @@ export default function ChatClient() {
           <button
             type="button"
             onClick={() => void handleClear()}
-            className="text-xs text-slate-500 hover:text-rose-600"
+            className="text-caption-sm text-mute hover:text-accent-red"
           >
             Xóa lịch sử
           </button>
@@ -198,28 +196,24 @@ export default function ChatClient() {
       </header>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto py-4 space-y-3">
+      <div className="flex-1 overflow-y-auto py-6 space-y-3">
         {loadingHistory && (
-          <p className="text-sm text-slate-400 text-center">
+          <p className="text-body-sm text-mute text-center">
             Đang tải lịch sử…
           </p>
         )}
 
         {!loadingHistory && messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full space-y-4">
-            <p className="text-sm text-slate-500">
+          <div className="flex flex-col items-center justify-center h-full space-y-6">
+            <div className="text-6xl" aria-hidden>💬</div>
+            <p className="text-body-md text-body text-center max-w-sm">
               Chào bạn! Hỏi tôi bất kỳ điều gì về chi tiêu của bạn.
             </p>
             <div className="flex flex-wrap justify-center gap-2">
               {SUGGESTED_QUESTIONS.map((q) => (
-                <button
-                  key={q}
-                  type="button"
-                  onClick={() => void handleSend(q)}
-                  className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 hover:border-slate-300 transition"
-                >
+                <PillTab key={q} onClick={() => void handleSend(q)}>
                   {q}
-                </button>
+                </PillTab>
               ))}
             </div>
           </div>
@@ -234,29 +228,24 @@ export default function ChatClient() {
 
       {/* Error */}
       {error && (
-        <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 mb-2">
-          {error}
+        <div className="mb-3">
+          <CalloutBanner severity="warning">{error}</CalloutBanner>
         </div>
       )}
 
-      {/* Suggested questions (when has messages) */}
+      {/* Quick suggestions (when has messages) */}
       {messages.length > 0 && !streaming && (
-        <div className="flex flex-wrap gap-1.5 pb-2">
+        <div className="flex flex-wrap gap-1.5 pb-3">
           {SUGGESTED_QUESTIONS.slice(0, 3).map((q) => (
-            <button
-              key={q}
-              type="button"
-              onClick={() => void handleSend(q)}
-              className="rounded-full border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-100 transition"
-            >
+            <PillTab key={q} onClick={() => void handleSend(q)}>
               {q}
-            </button>
+            </PillTab>
           ))}
         </div>
       )}
 
       {/* Input */}
-      <div className="flex items-end gap-2 border-t border-slate-200 pt-3">
+      <div className="flex items-end gap-2 border-t border-hairline-soft pt-4">
         <textarea
           ref={inputRef}
           value={input}
@@ -265,16 +254,15 @@ export default function ChatClient() {
           placeholder="Nhập câu hỏi..."
           rows={1}
           disabled={streaming}
-          className="flex-1 resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400 focus:border-slate-500 focus:outline-none disabled:opacity-60"
+          className="flex-1 resize-none rounded-md border border-hairline bg-surface-card px-3 py-2 text-body-md text-ink placeholder:text-ash focus:outline-none focus:border-accent-blue focus:ring-2 focus:ring-accent-blue/20 disabled:opacity-60"
         />
-        <button
-          type="button"
+        <Button
+          variant="primary"
           onClick={() => void handleSend()}
           disabled={streaming || !input.trim()}
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50 transition"
         >
           {streaming ? "..." : "Gửi"}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -285,15 +273,15 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[80%] rounded-lg px-4 py-3 text-sm whitespace-pre-wrap ${
+        className={`max-w-[85%] rounded-lg px-4 py-3 text-body-md whitespace-pre-wrap ${
           isUser
-            ? "bg-slate-900 text-white"
-            : "bg-white border border-slate-200 text-slate-900"
+            ? "bg-ink text-on-dark"
+            : "bg-surface-card border border-hairline text-ink"
         }`}
       >
         {message.content || (message.streaming ? "⏳" : "")}
         {message.streaming && message.content && (
-          <span className="inline-block w-1.5 h-4 bg-slate-400 animate-pulse ml-0.5 align-text-bottom" />
+          <span className="inline-block w-1.5 h-4 bg-mute animate-pulse ml-0.5 align-text-bottom" />
         )}
       </div>
     </div>

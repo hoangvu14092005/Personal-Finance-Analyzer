@@ -1648,3 +1648,66 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - **Date parsing**: normalize trả đúng `2026-05-13` dù format raw là `Ngay: 2026-05-13`. LLM đủ thông minh.
   - **STORAGE_BACKEND=s3 permanent**: dev giờ phải chạy MinIO. Nếu muốn dùng local FS trở lại, set STORAGE_BACKEND=local + chạy cả 2 service từ cùng root folder.
   - **dotenv load order**: `load_dotenv` phải trước `from pfa_shared.config import CommonSettings`. Đã note rõ trong worker_app.py.
+
+
+### 2026-05-14 - phase-8 - UI Redesign per DESIGN.md (PostHog-inspired system)
+- Goal:
+  - Áp dụng design system `DESIGN.md` cho toàn bộ frontend: cream canvas, yellow CTA, IBM Plex Sans, hairline cards (không drop shadows), pastel callout banners.
+- Files changed:
+  - **Foundation**:
+    - frontend/web/app/globals.css (rewrite — design tokens qua `@theme inline`, IBM Plex Sans font stack, typography utility classes, responsive hero scale)
+    - frontend/web/app/layout.tsx (IBM Plex Sans + JetBrains Mono via next/font/google, switch sang Nav/Footer components mới, lang="vi")
+  - **Primitive components** (`components/ui/`):
+    - Button.tsx (primary/secondary/tertiary/danger + md/sm sizes)
+    - Input.tsx + Textarea.tsx (hairline border, blue focus ring)
+    - Card.tsx (product/feature/doc/pricing variants, flat không shadow)
+    - PillTab.tsx (active flip ink/white)
+    - Badge.tsx (blue/green/red/purple/neutral tones + BadgeUppercase)
+    - CalloutBanner.tsx (info/success/warning/note với emoji icons)
+    - Heading.tsx (DisplayXl/DisplayLg/HeadingLg/HeadingMd/HeadingSmMixed/Eyebrow)
+    - index.ts (barrel export)
+  - **Layout chrome** (`components/layout/`):
+    - Nav.tsx (sticky cream bg, desktop links + hamburger mobile drawer, yellow CTA "Bắt đầu miễn phí")
+    - Footer.tsx (3-column grid: Sản phẩm / Tài nguyên / Công ty, copyright row)
+  - **Pages redesigned**:
+    - app/page.tsx (landing: hero display-xl + 2 CTAs + 3 feature tiles + bottom CTA section, section rhythm 80px)
+    - app/login/page.tsx + app/register/page.tsx (centered card max-md, yellow primary submit, link-teal anchors)
+    - app/health/page.tsx (CalloutBanner status + doc-card endpoint info)
+    - app/budgets/budgets-client.tsx (Card form + progress bars với accent-green/purple/red theo status)
+    - app/chat/chat-client.tsx (mascot 💬 empty state, PillTab suggested questions, bubble ink/on-dark vs surface-card/border-hairline)
+    - app/transactions/transaction-history-client.tsx (filter Card + table với surface-soft header, CalloutBanner status messages)
+    - app/transactions/new/page.tsx (centered form Card max-2xl, Textarea note)
+    - app/receipts/upload/page.tsx (dashed hairline dropzone, CalloutBanner status)
+    - app/receipts/[id]/review/page.tsx (low-confidence accent-red borders, code-block surface-dark cho raw OCR)
+    - app/dashboard/dashboard-client.tsx (migrate script: slate-* → design tokens, rounded-2xl → rounded-md, bỏ shadow-sm)
+- What was implemented:
+  - **Design tokens qua Tailwind v4 CSS `@theme inline`**: canvas (#eeefe9), surface-soft/card/doc/dark, ink/body/charcoal/mute/ash/hairline palette, primary (#f7a501 yellow-orange) + pressed + active + on variants, accent-blue/green/red/purple + soft versions, link-blue/teal.
+  - **Typography scale**: display-xl (36/700), display-lg (24/800), heading-lg/md/sm/sm-mixed, body-md/strong/sm/xs, caption-md/sm/xs, utility-xs, button-md/sm. Responsive: hero scales 36px → 28px mobile.
+  - **Flat cards với hairline borders**: không drop shadows theo DESIGN.md. 4 variants (product/feature/doc/pricing) khác padding.
+  - **Yellow CTA**: duy nhất saturated color trong system. Dùng cho "Bắt đầu miễn phí", "Lưu giao dịch", "Gửi" chat, "Sinh insight".
+  - **Callout banners pastel**: blue info 💡, green success ✅, red warning ⚠️, purple note 📘 — theo DESIGN.md specs.
+  - **IBM Plex Sans Variable**: next/font/google với vietnamese subset, weight 400/500/600/700. Fallback Inter → system-ui.
+  - **Emoji mascots** (💰 logo, 💬 chat, 🧾 upload, 📊 dashboard) thay vì custom hedgehog illustrations (không có designer).
+  - **Mobile responsive**: Nav collapse hamburger drawer ở < 768px, card grid 3-up → 1-up, typography scale xuống.
+- Validation:
+  - `corepack pnpm build`: ✅ compiled successfully 4.2s, 14 pages generated.
+  - `corepack pnpm lint`: ✅ clean, no ESLint errors.
+  - `npx tsc --noEmit`: ✅ clean.
+  - Dev server start OK tại localhost:3000.
+  - Landing page GET / → 200 OK, 54KB HTML.
+  - Bundle sizes hợp lý: landing 121KB first load, dashboard 220KB (có Recharts).
+- Pending / Next:
+  - Manual visual QA: chụp screenshot mỗi page, compare với DESIGN.md specs.
+  - Mobile device test (iOS/Android Chrome).
+  - Lighthouse accessibility audit (target ≥ 90).
+  - Update Playwright selectors nếu có test fail do DOM đổi.
+  - Phase 9 — Hardening, UAT & Release sẵn sàng.
+- Risks / Notes:
+  - **Không có custom hedgehog mascot**: dùng emoji 💰/💬/🧾/📊. Nếu sau này có designer, thay bằng inline SVG illustrations.
+  - **Font Vietnamese subset**: next/font/google auto load. Load time ~50-100ms first visit, cached sau.
+  - **Dashboard script migration**: đã chạy script regex replace slate-* → design tokens cho `dashboard-client.tsx` (743 lines, quá lớn để rewrite tay). Logic không đụng, chỉ đổi className. Script đã xóa sau khi chạy.
+  - **Responsive chat**: max-w-2xl (720px) centered, mobile full-width. Touch targets ≥ 40px cho Input + Button.
+  - **Low confidence receipt**: highlight accent-red/50 border thay vì amber trước đó — đồng bộ với design token.
+  - **Code block surface-dark**: raw OCR text trong review page dùng surface-dark (23251d) với text on-dark — matching DESIGN.md code-block spec.
+  - **Tailwind v4**: dùng `@theme inline` trong globals.css thay vì `tailwind.config.ts` (không cần). Design tokens → CSS custom properties tự động expose thành `bg-canvas`, `text-ink`, v.v.
+  - **E2E tests chưa update**: Playwright selectors có thể match label tiếng Việt khác (ví dụ cũ: "Dang nhap" no dấu → mới: "Đăng nhập" có dấu). Phase 9 hardening sẽ update nếu cần.

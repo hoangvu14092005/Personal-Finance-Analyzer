@@ -14,6 +14,14 @@ import {
   listBudgets,
   updateBudget,
 } from "@/lib/budgets-api";
+import {
+  Badge,
+  Button,
+  CalloutBanner,
+  Card,
+  DisplayLg,
+  Input,
+} from "@/components/ui";
 
 type FormState = {
   categoryId: string;
@@ -29,46 +37,43 @@ function currentPeriodMonth(): string {
 }
 
 function formatVnd(value: string): string {
-  // Server trả decimal string (vd "1000000.00"). Hiển thị có dấu phẩy,
-  // bỏ phần thập phân = 0 để VND nhìn gọn.
   const num = Number(value);
   if (!Number.isFinite(num)) return value;
   return num.toLocaleString("vi-VN", { maximumFractionDigits: 0 });
 }
 
-function statusBadgeClass(status: BudgetUsage["status"]): string {
+type BudgetStatus = BudgetUsage["status"];
+
+function statusTone(status: BudgetStatus): "green" | "purple" | "red" {
   switch (status) {
     case "exceeded":
-      return "bg-rose-100 text-rose-800 border-rose-200";
+      return "red";
     case "warning":
-      return "bg-amber-100 text-amber-800 border-amber-200";
-    case "safe":
+      return "purple";
     default:
-      return "bg-emerald-100 text-emerald-800 border-emerald-200";
+      return "green";
   }
 }
 
-function statusLabel(status: BudgetUsage["status"]): string {
+function statusLabel(status: BudgetStatus): string {
   switch (status) {
     case "exceeded":
       return "Vượt ngân sách";
     case "warning":
       return "Sắp vượt";
-    case "safe":
     default:
       return "An toàn";
   }
 }
 
-function progressBarColor(status: BudgetUsage["status"]): string {
+function progressBarColor(status: BudgetStatus): string {
   switch (status) {
     case "exceeded":
-      return "bg-rose-500";
+      return "bg-accent-red";
     case "warning":
-      return "bg-amber-500";
-    case "safe":
+      return "bg-accent-purple";
     default:
-      return "bg-emerald-500";
+      return "bg-accent-green";
   }
 }
 
@@ -94,7 +99,6 @@ export default function BudgetsClient() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Auth gate.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -142,7 +146,6 @@ export default function BudgetsClient() {
     return map;
   }, [categories]);
 
-  // Map budget_id → usage để render thông tin trong list.
   const usageByBudgetId = useMemo(() => {
     const map = new Map<number, BudgetUsage>();
     for (const u of usages) map.set(u.budget_id, u);
@@ -202,8 +205,6 @@ export default function BudgetsClient() {
           amount: trimmedAmount,
         });
       }
-      // Nếu user tạo budget cho tháng khác với period filter → đổi filter
-      // sang tháng đó để họ thấy ngay.
       const nextPeriod = editingId === null ? form.periodMonth : period;
       resetForm();
       if (nextPeriod !== period) {
@@ -238,145 +239,131 @@ export default function BudgetsClient() {
 
   if (!authReady) {
     return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-8">
-        <p className="text-sm text-slate-600">Đang xác thực phiên đăng nhập...</p>
-      </section>
+      <Card>
+        <p className="text-body-sm text-mute">Đang xác thực phiên đăng nhập...</p>
+      </Card>
     );
   }
 
   const isEditing = editingId !== null;
 
   return (
-    <section className="space-y-6">
-      <header className="flex items-start justify-between gap-4">
+    <div className="space-y-6">
+      <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Ngân sách</h1>
-          <p className="text-sm text-slate-600">
+          <DisplayLg>Ngân sách</DisplayLg>
+          <p className="text-body-sm text-body mt-1">
             Đặt ngưỡng chi tiêu theo danh mục và theo dõi mức sử dụng trong tháng.
           </p>
         </div>
-        <label className="text-sm font-medium text-slate-700">
+        <label className="text-body-xs text-ink flex items-center gap-2">
           Tháng
-          <input
+          <Input
             type="month"
             value={period}
             onChange={(event) => setPeriod(event.target.value || currentPeriodMonth())}
-            className="ml-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+            className="w-auto"
           />
         </label>
       </header>
 
       {loadError ? (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-          {loadError}
-        </div>
+        <CalloutBanner severity="warning">{loadError}</CalloutBanner>
       ) : null}
 
-      <form
-        onSubmit={onSubmit}
-        className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-4"
-      >
-        <label className="text-sm font-medium text-slate-700 md:col-span-2">
-          Danh mục
-          <select
-            value={form.categoryId}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, categoryId: event.target.value }))
-            }
-            disabled={isEditing}
-            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:bg-slate-100 disabled:opacity-70"
-          >
-            <option value="">— Chọn danh mục —</option>
-            {categories.map((category) => (
-              <option key={category.id} value={String(category.id)}>
-                {category.name}
-                {category.is_system ? "" : " (custom)"}
-              </option>
-            ))}
-          </select>
-          {isEditing ? (
-            <span className="mt-1 block text-xs text-slate-500">
-              Không đổi được khi sửa — xoá và tạo lại nếu cần.
-            </span>
-          ) : null}
-        </label>
-
-        <label className="text-sm font-medium text-slate-700">
-          Tháng (YYYY-MM)
-          <input
-            type="month"
-            value={form.periodMonth}
-            onChange={(event) =>
-              setForm((prev) => ({
-                ...prev,
-                periodMonth: event.target.value || currentPeriodMonth(),
-              }))
-            }
-            disabled={isEditing}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-100 disabled:opacity-70"
-          />
-        </label>
-
-        <label className="text-sm font-medium text-slate-700">
-          Số tiền (VND)
-          <input
-            type="text"
-            inputMode="decimal"
-            required
-            value={form.amount}
-            onChange={(event) =>
-              setForm((prev) => ({ ...prev, amount: event.target.value }))
-            }
-            placeholder="VD: 2000000"
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-          />
-        </label>
-
-        {submitError ? (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 md:col-span-4">
-            {submitError}
-          </div>
-        ) : null}
-
-        <div className="flex items-center gap-2 md:col-span-4">
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {submitting ? "Đang lưu..." : isEditing ? "Cập nhật" : "Thêm ngân sách"}
-          </button>
-          {isEditing ? (
-            <button
-              type="button"
-              onClick={resetForm}
-              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+      <Card>
+        <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-4">
+          <label className="text-body-xs text-ink md:col-span-2">
+            Danh mục
+            <select
+              value={form.categoryId}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, categoryId: event.target.value }))
+              }
+              disabled={isEditing}
+              className="mt-1.5 w-full h-9 rounded-md border border-hairline bg-surface-card px-3 text-body-md text-ink focus:outline-none focus:border-accent-blue focus:ring-2 focus:ring-accent-blue/20 disabled:bg-surface-soft disabled:text-ash"
             >
-              Huỷ sửa
-            </button>
-          ) : null}
-        </div>
-      </form>
+              <option value="">— Chọn danh mục —</option>
+              {categories.map((category) => (
+                <option key={category.id} value={String(category.id)}>
+                  {category.name}
+                  {category.is_system ? "" : " (custom)"}
+                </option>
+              ))}
+            </select>
+            {isEditing ? (
+              <span className="mt-1 block text-caption-sm text-mute">
+                Không đổi được khi sửa — xoá và tạo lại nếu cần.
+              </span>
+            ) : null}
+          </label>
 
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">
-            Ngân sách tháng {period}
-          </h2>
-          <p className="text-xs text-slate-500">
+          <label className="text-body-xs text-ink">
+            Tháng (YYYY-MM)
+            <Input
+              type="month"
+              value={form.periodMonth}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  periodMonth: event.target.value || currentPeriodMonth(),
+                }))
+              }
+              disabled={isEditing}
+              className="mt-1.5"
+            />
+          </label>
+
+          <label className="text-body-xs text-ink">
+            Số tiền (VND)
+            <Input
+              type="text"
+              inputMode="decimal"
+              required
+              value={form.amount}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, amount: event.target.value }))
+              }
+              placeholder="VD: 2000000"
+              className="mt-1.5"
+            />
+          </label>
+
+          {submitError ? (
+            <div className="md:col-span-4">
+              <CalloutBanner severity="warning">{submitError}</CalloutBanner>
+            </div>
+          ) : null}
+
+          <div className="flex items-center gap-2 md:col-span-4">
+            <Button type="submit" variant="primary" disabled={submitting}>
+              {submitting ? "Đang lưu..." : isEditing ? "Cập nhật" : "Thêm ngân sách"}
+            </Button>
+            {isEditing ? (
+              <Button type="button" variant="secondary" onClick={resetForm}>
+                Huỷ sửa
+              </Button>
+            ) : null}
+          </div>
+        </form>
+      </Card>
+
+      <Card className="p-0 overflow-hidden">
+        <div className="border-b border-hairline-soft px-6 py-4">
+          <h2 className="text-heading-md text-ink">Ngân sách tháng {period}</h2>
+          <p className="text-caption-sm text-mute mt-1">
             Sắp xếp theo % sử dụng giảm dần.
           </p>
         </div>
 
         {loading ? (
-          <div className="px-6 py-8 text-sm text-slate-500">Đang tải…</div>
+          <div className="px-6 py-8 text-body-sm text-mute">Đang tải…</div>
         ) : budgets.length === 0 ? (
-          <div className="px-6 py-8 text-sm text-slate-500">
+          <div className="px-6 py-8 text-body-sm text-mute">
             Chưa có ngân sách nào cho tháng này. Hãy thêm phía trên.
           </div>
         ) : (
-          <ul className="divide-y divide-slate-100">
-            {/* Sort theo usage DESC; budget không có usage (0%) đẩy cuối. */}
+          <ul className="divide-y divide-hairline-soft">
             {[...budgets]
               .sort((a, b) => {
                 const ua = usageByBudgetId.get(a.id)?.percent_used ?? 0;
@@ -397,7 +384,7 @@ export default function BudgetsClient() {
                     className="flex flex-col gap-3 px-6 py-4 md:flex-row md:items-center md:justify-between"
                   >
                     <div className="flex-1 space-y-2">
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 flex-wrap">
                         {cat?.color ? (
                           <span
                             aria-hidden
@@ -405,54 +392,46 @@ export default function BudgetsClient() {
                             style={{ backgroundColor: cat.color }}
                           />
                         ) : null}
-                        <span className="text-sm font-semibold text-slate-900">
-                          {name}
-                        </span>
-                        <span
-                          className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusBadgeClass(
-                            status,
-                          )}`}
-                        >
+                        <span className="text-body-strong text-ink">{name}</span>
+                        <Badge tone={statusTone(status)}>
                           {statusLabel(status)}
-                        </span>
+                        </Badge>
                       </div>
 
-                      <div className="flex items-center gap-3 text-xs text-slate-600">
+                      <div className="flex items-center gap-3 text-caption-sm text-body flex-wrap">
                         <span>
                           Đã dùng:{" "}
-                          <strong className="text-slate-900">
+                          <strong className="text-ink">
                             {formatVnd(usage?.spent_amount ?? "0")}
                           </strong>
                         </span>
-                        <span>/</span>
+                        <span className="text-ash">/</span>
                         <span>
                           Ngân sách:{" "}
-                          <strong className="text-slate-900">
+                          <strong className="text-ink">
                             {formatVnd(budget.amount)}
                           </strong>
                         </span>
-                        <span className="ml-auto font-medium text-slate-800">
+                        <span className="ml-auto font-semibold text-ink">
                           {percent.toFixed(0)}%
                         </span>
                       </div>
 
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-surface-soft">
                         <div
-                          className={`h-full rounded-full transition-all ${progressBarColor(
-                            status,
-                          )}`}
+                          className={`h-full rounded-full transition-all ${progressBarColor(status)}`}
                           style={{ width: `${barWidth}%` }}
                         />
                       </div>
 
                       {usage ? (
-                        <div className="text-xs text-slate-500">
+                        <div className="text-caption-sm text-mute">
                           Còn lại:{" "}
                           <span
                             className={
                               Number(usage.remaining_amount) < 0
-                                ? "font-semibold text-rose-600"
-                                : "font-semibold text-emerald-600"
+                                ? "font-semibold text-accent-red"
+                                : "font-semibold text-accent-green"
                             }
                           >
                             {formatVnd(usage.remaining_amount)}
@@ -462,27 +441,29 @@ export default function BudgetsClient() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <button
+                      <Button
                         type="button"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => startEdit(budget)}
-                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
                       >
                         Sửa
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
+                        variant="danger"
+                        size="sm"
                         onClick={() => void onDelete(budget)}
-                        className="rounded-lg border border-rose-300 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"
                       >
                         Xoá
-                      </button>
+                      </Button>
                     </div>
                   </li>
                 );
               })}
           </ul>
         )}
-      </div>
-    </section>
+      </Card>
+    </div>
   );
 }
