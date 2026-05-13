@@ -1,331 +1,333 @@
 # Personal Finance Analyzer
 
-Monorepo cho ung dung quan ly chi tieu ca nhan, gom frontend, backend API, worker va local infrastructure.
+Monorepo ứng dụng quản lý chi tiêu cá nhân với AI: upload hóa đơn → OCR tự động → dashboard phân tích → chatbot hỏi đáp bằng tiếng Việt.
+
+## Tech Stack
+
+- **Frontend**: Next.js 15 + React 19 + Tailwind CSS v4 + Recharts
+- **Backend API**: FastAPI + SQLModel + JWT (HttpOnly cookie)
+- **Worker**: TaskIQ + Redis cho OCR + RAG indexing
+- **Data**: PostgreSQL 16 + pgvector, MinIO (S3-compatible)
+- **AI**:
+  - LLM: OpenAI-compatible endpoint (`cx/gpt-5.5`) — chat + vision OCR
+  - Embeddings: `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` (local, 384-dim)
+
+## Features
+
+- ✅ Auth (register/login/logout/me)
+- ✅ Upload hóa đơn → **LLM Vision OCR** (real, không phải mock)
+- ✅ Review form với low-confidence highlight + category suggestion
+- ✅ Transactions CRUD + filter/pagination
+- ✅ Dashboard analytics (date presets, donut chart, previous-period compare)
+- ✅ Budgets per category per month + usage tracking
+- ✅ **AI Chatbot** với function calling (SQL tools + RAG tools)
+- ✅ **RAG search** trên OCR content + semantic transaction search (pgvector)
+- ✅ UI redesign theo design system (cream canvas, yellow CTA, IBM Plex Sans)
 
 ## Repository Structure
 
-- `frontend/web`: Web app (Next.js)
-- `backend/api`: FastAPI service
-- `backend/worker`: Background worker
-- `backend/shared`: Shared Python package dung chung cho API/worker
-- `infra/docker`: Dockerfiles va local container setup
-- `docs`: Tai lieu du an
+```
+frontend/web/          # Next.js app (pages, components/ui, components/layout, lib)
+backend/
+  api/                 # FastAPI (core, api/v1, services, services/chat, dependencies)
+  worker/              # TaskIQ worker (tasks, index_tasks, ocr_provider)
+  shared/pfa_shared/   # SQLModel entities, config, storage adapters
+infra/docker/          # PostgreSQL + Redis + MinIO docker-compose
+docs/                  # Architecture documentation
+.kiro/specs/           # Feature specs (requirements / design / tasks)
+tasks/                 # Phase task breakdowns
+```
 
-## Local Run (Current)
+---
 
-Trang thai hien tai da chay duoc:
-- Frontend (Next.js 15 + React 19 + Tailwind + Recharts)
-- Backend API (FastAPI)
-- Worker (TaskIQ + Redis)
-- Local infra (PostgreSQL, Redis, MinIO)
-- Auth flow (register/login/logout/me)
-- Receipt upload flow + polling status + OCR mock baseline
-- Receipt review form (low-confidence highlight + category suggestion)
-- Manual transaction entry + Transactions history (filter/pagination/delete)
-- Dashboard analytics (time presets, donut chart, previous-period compare)
+## Prerequisites
 
-### One-shot (Copy 1 Block)
+- **Docker Desktop** (chạy infrastructure)
+- **Python 3.12+**
+- **Node.js 20+** và **pnpm** (qua corepack)
+- **LLM endpoint** chạy tại `http://localhost:20128/v1` (OpenAI-compatible, hỗ trợ vision + function calling)
 
-Chay block sau trong PowerShell tai root repo `D:\VuLapTrinh2\Personal_Finance_Analyzer`.
-Block nay se:
-- up local infra (PostgreSQL, Redis, MinIO),
-- mo 3 terminal rieng cho API, worker, frontend,
-- in ra URL de check nhanh.
+---
+
+## First-time Setup (1 lần)
+
+### 1. Start infrastructure
 
 ```powershell
-Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer"
-
-# 1) Start infra
 Set-Location "infra\docker"
 docker compose up -d
-Set-Location "..\.."
-
-# 2) Start API in new terminal
-Start-Process powershell -ArgumentList @(
-	"-NoExit",
-	"-Command",
-	"Set-Location 'D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\api'; python -m uv sync --all-groups; python -m uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
-)
-
-# 3) Start worker in new terminal
-Start-Process powershell -ArgumentList @(
-	"-NoExit",
-	"-Command",
-	"Set-Location 'D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker'; python -m uv sync --all-groups; python -m uv run taskiq worker --app-dir 'D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker' worker_app:broker"
-)
-
-# 4) Start frontend in new terminal
-Start-Process powershell -ArgumentList @(
-	"-NoExit",
-	"-Command",
-	"Set-Location 'D:\VuLapTrinh2\Personal_Finance_Analyzer\frontend\web'; pnpm install; pnpm dev"
-)
-
-Write-Host "Infra/API/Worker/Frontend are starting..."
-Write-Host "API health: http://127.0.0.1:8000/health"
-Write-Host "Frontend : http://localhost:3000"
-Write-Host "API docs : http://127.0.0.1:8000/docs"
 ```
 
-### 1) Prerequisites
-
-- Node.js 20+
-- pnpm
-- Python 3.12+
-- uv (hoac su dung `python -m uv`)
-- Docker Desktop (hoac Docker daemon)
-
-### 2) Run Backend API
-
-PowerShell:
-
+Verify 3 services healthy:
 ```powershell
-Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\api"
-python -m uv sync --all-groups
-python -m uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Neu ban muon chay tu bat ky thu muc nao (an toan hon), dung lenh nay:
-
-```powershell
-python -m uv run uvicorn --app-dir "D:/VuLapTrinh2/Personal_Finance_Analyzer/backend/api" app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Kiem tra health:
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/health"
+docker ps --filter "name=pfa-"
 ```
 
 Expected:
+- `pfa-postgres-dev` — PostgreSQL + pgvector trên port **5433**
+- `pfa-redis-dev` — Redis trên port 6379
+- `pfa-minio-dev` — MinIO API trên port 9000, Console trên 9001
 
-```json
-{"status":"ok","service":"api"}
-```
+> **Note**: PostgreSQL dùng port **5433** (không phải 5432) để tránh conflict với PostgreSQL native trên Windows.
 
-### 2.1) Run Local Infra
-
-Luu y: can mo Docker Desktop (hoac Docker daemon) truoc khi chay command.
-
-PowerShell:
+### 2. Install backend dependencies
 
 ```powershell
-Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\infra\docker"
+Set-Location "backend\api"
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ..\shared
+.\.venv\Scripts\python.exe -m pip install -e .
+```
+
+Worker dùng chung `.venv` với API (tránh download lại model sentence-transformers ~500MB).
+
+### 3. Apply database migration + seed categories
+
+```powershell
+Set-Location "backend\api"
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m scripts.seed_categories
+```
+
+Migration sẽ:
+- Tạo tất cả tables (users, transactions, receipts, budgets, chat_messages, receipt_text_chunks, ...)
+- Enable pgvector extension
+- Tạo IVFFlat indexes cho vector search
+
+### 4. Setup environment files
+
+Copy `.env.example` → `.env` trong cả 3 folder và điền LLM config:
+
+```powershell
+Copy-Item backend\api\.env.example backend\api\.env
+Copy-Item backend\worker\.env.example backend\worker\.env
+```
+
+Chỉnh trong `backend/api/.env` và `backend/worker/.env`:
+```
+CHAT_LLM_BASE_URL=http://localhost:20128/v1
+CHAT_LLM_API_KEY=sk-your-api-key-here
+CHAT_LLM_MODEL=cx/gpt-5.5
+STORAGE_BACKEND=s3
+DATABASE_URL=postgresql+psycopg://pfa:pfa@localhost:5433/pfa
+```
+
+Worker cần thêm:
+```
+OCR_PROVIDER=llm_vision
+```
+
+### 5. Install frontend
+
+```powershell
+Set-Location "frontend\web"
+corepack pnpm install
+```
+
+---
+
+## Chạy hàng ngày (4 terminals)
+
+### Terminal 1 — Docker services
+
+```powershell
+Set-Location "infra\docker"
 docker compose up -d
-docker compose ps
 ```
 
-Services:
-- PostgreSQL: `localhost:5433` (đổi từ 5432 để tránh conflict với PostgreSQL native trên Windows)
-- Redis: `localhost:6379`
-- MinIO API: `http://localhost:9000`
-- MinIO Console: `http://localhost:9001`
-
-MinIO default credentials:
-- username: `minioadmin`
-- password: `minioadmin`
-
-Bucket `pfa-receipts` duoc tao tu dong boi init service `minio-init`.
-
-Kiem tra nhanh init logs:
+### Terminal 2 — Backend API
 
 ```powershell
-docker compose logs minio-init
+Set-Location "backend\api"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Dung local infra:
+API ready tại `http://127.0.0.1:8000` · Swagger UI tại `/docs`
+
+### Terminal 3 — Worker (OCR + RAG indexing)
 
 ```powershell
-docker compose down
+Set-Location "backend\worker"
+..\api\.venv\Scripts\python.exe -m taskiq worker --app-dir . worker_app:broker tasks index_tasks
 ```
 
-### 3) Run Frontend
+Worker sẽ import cả `tasks` (process_ocr_job) và `index_tasks` (index_receipt_text).
 
-Mo terminal khac, chay:
+### Terminal 4 — Frontend
 
 ```powershell
-Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\frontend\web"
-pnpm install
-pnpm dev
+Set-Location "frontend\web"
+corepack pnpm dev
 ```
 
-Mo trinh duyet:
-- Frontend home: http://localhost:3000
-- Frontend health page: http://localhost:3000/health
-- Frontend login page: http://localhost:3000/login
-- Frontend register page: http://localhost:3000/register
-- Frontend dashboard (protected): http://localhost:3000/dashboard
-- Frontend receipt upload: http://localhost:3000/receipts/upload
-- Frontend transactions history: http://localhost:3000/transactions
-- Frontend manual entry: http://localhost:3000/transactions/new
-- Backend API docs: http://127.0.0.1:8000/docs
+Frontend ready tại `http://localhost:3000`
 
-### 4) Run Worker
+---
 
-Can Redis chay tai `localhost:6379`.
+## URLs
 
-PowerShell:
+| URL | Dùng cho |
+|---|---|
+| http://localhost:3000 | Landing page |
+| http://localhost:3000/register | Đăng ký |
+| http://localhost:3000/login | Đăng nhập |
+| http://localhost:3000/dashboard | Dashboard (protected) |
+| http://localhost:3000/receipts/upload | Upload hóa đơn |
+| http://localhost:3000/transactions | Lịch sử giao dịch |
+| http://localhost:3000/transactions/new | Nhập tay |
+| http://localhost:3000/budgets | Quản lý ngân sách |
+| http://localhost:3000/chat | 💬 Trợ lý AI |
+| http://127.0.0.1:8000/docs | API Swagger UI |
+| http://localhost:9001 | MinIO Console (minioadmin / minioadmin) |
+
+---
+
+## Smoke Test Flow
+
+1. Mở `http://localhost:3000` → bấm "Bắt đầu miễn phí"
+2. Đăng ký tài khoản → login
+3. Vào `/receipts/upload` → upload ảnh hóa đơn (JPG/PNG, < 10MB)
+4. Đợi ~10-20s cho LLM Vision OCR chạy
+5. Tự động redirect sang review form → lưu transaction
+6. Vào `/chat` → hỏi một số câu:
+   - "Tháng này tôi tiêu bao nhiêu?" (SQL tool)
+   - "Hóa đơn Grab tuần này có món gì?" (RAG tool — receipt content)
+   - "Tôi có mua đồ skincare không?" (semantic search)
+
+---
+
+## Scripts
+
+### Backend quality checks
 
 ```powershell
-Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker"
-python -m uv sync --all-groups
-python -m uv run taskiq worker --app-dir "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker" worker_app:broker
+Set-Location "backend\api"
+.\.venv\Scripts\python.exe -m ruff check app tests
+.\.venv\Scripts\python.exe -m mypy app
+.\.venv\Scripts\python.exe -m pytest
 ```
 
-Mo terminal khac de ban demo task:
+### Worker quality checks
 
 ```powershell
-python -m uv run --project "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker" python "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker\run_ping.py"
+Set-Location "backend\worker"
+..\api\.venv\Scripts\python.exe -m ruff check .
+..\api\.venv\Scripts\python.exe -m mypy .
+..\api\.venv\Scripts\python.exe -m pytest
 ```
 
-Expected output:
-
-```text
-ping
-```
-
-### 5) Test Commands
-
-#### Frontend
+### Frontend quality checks
 
 ```powershell
-Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\frontend\web"
-pnpm lint
-pnpm build
-pnpm e2e   # Playwright (can backend + infra up)
+Set-Location "frontend\web"
+corepack pnpm lint
+corepack pnpm build
+npx tsc --noEmit
+corepack pnpm e2e  # Playwright — cần backend + infra up
 ```
 
-#### Backend API
+### Backfill embeddings (nếu đã có data cũ trước Phase 7)
 
 ```powershell
-Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\api"
-python -m uv sync --all-groups
-python -m uv run ruff check app tests
-python -m uv run mypy app
-python -m uv run pytest
+Set-Location "backend\api"
+.\.venv\Scripts\python.exe -m scripts.backfill_receipt_embeddings
+.\.venv\Scripts\python.exe -m scripts.backfill_transaction_embeddings
 ```
 
-#### Backend Worker
+---
 
-```powershell
-Set-Location "D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\worker"
-python -m uv sync --all-groups
-python -m uv run ruff check . tests
-python -m uv run mypy .
-python -m uv run pytest
+## Environment Variables
+
+### `backend/api/.env`
+
+| Variable | Default | Mô tả |
+|---|---|---|
+| `APP_ENV` | `local` | local / test / staging / prod |
+| `DATABASE_URL` | `postgresql+psycopg://pfa:pfa@localhost:5433/pfa` | PostgreSQL URL |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis URL |
+| `STORAGE_BACKEND` | `local` | `local` hoặc `s3` (MinIO) |
+| `S3_ENDPOINT` | `http://localhost:9000` | MinIO endpoint |
+| `JWT_SECRET` | dev placeholder | **Bắt buộc override** ở staging/prod |
+| `CHAT_LLM_BASE_URL` | `http://localhost:20128/v1` | OpenAI-compatible endpoint |
+| `CHAT_LLM_API_KEY` | — | API key |
+| `CHAT_LLM_MODEL` | `cx/gpt-5.5` | Model name |
+
+### `backend/worker/.env`
+
+Tương tự API + thêm:
+
+| Variable | Default | Mô tả |
+|---|---|---|
+| `OCR_PROVIDER` | `mock` | `mock` hoặc `llm_vision` |
+
+### `frontend/web/.env.local` (optional)
+
+```
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-### 6) Quick Manual Test (Auth + Receipt Upload)
+---
 
-1. Start infra, API, frontend (va worker neu muon OCR queue consume).
-2. Mo `http://localhost:3000/register`, tao tai khoan moi.
-3. Dang nhap o `http://localhost:3000/login`.
-4. Vao `http://localhost:3000/receipts/upload`, upload file JPG/PNG/PDF.
-5. Xac nhan UI hien trang thai `uploading -> processing -> ready/failed`.
-6. Neu failed/timeout, kiem tra fallback manual-entry message tren UI.
+## Troubleshooting
 
-### 7) Environment Files
+| Vấn đề | Fix |
+|---|---|
+| `password authentication failed for user pfa` khi chạy alembic | Port 5432 đang bị PostgreSQL native Windows chiếm. Docker đã map sang 5433. Check `DATABASE_URL` trong `.env` có `localhost:5433` |
+| Worker không xử lý OCR | Check `backend/worker/.env` có `OCR_PROVIDER=llm_vision` + `CHAT_LLM_*` đầy đủ |
+| `storage_key missing` khi OCR | Cả API và Worker phải set `STORAGE_BACKEND=s3` để dùng chung MinIO |
+| Chat trả "Unknown tool" | Reinstall shared package editable: `pip install -e ..\shared` |
+| Embedding model load chậm (~30s) lần đầu | Bình thường, model ~500MB download từ HuggingFace. Cache sau đó |
+| Playwright e2e fail | Cần Docker + backend API + worker đều chạy; chạy `pnpm e2e:ui` để debug |
+| Frontend không connect API | Kiểm tra `NEXT_PUBLIC_API_BASE_URL` và CORS origin trong API |
 
-Copy env examples thanh `.env` (neu can custom gia tri local):
+---
 
-- `frontend/web/.env.example`
-- `backend/api/.env.example`
-- `backend/worker/.env.example`
+## Architecture Overview
 
-### 8) Common Pitfall
+```
+User Browser
+    │
+    ├─ Frontend (Next.js) ──────┐
+    │                            ▼
+    │                     Backend API (FastAPI)
+    │                       │       │
+    │                       │       ├─ SQLModel ──► PostgreSQL (+ pgvector)
+    │                       │       ├─ boto3 ─────► MinIO (S3)
+    │                       │       └─ TaskIQ ────► Redis (queue)
+    │                       │                         │
+    │                       │                         ▼
+    │                       │                    Worker
+    │                       │                    ├─ LLM Vision OCR
+    │                       │                    └─ sentence-transformers (embed)
+    │                       │
+    │                       └─ Chat Orchestrator
+    │                           └─ LLM (cx/gpt-5.5)
+    │                               ├─ Function calling → SQL tools
+    │                               └─ RAG tools → pgvector search
+```
 
-- Neu chay uvicorn trong `backend/api/app` voi `main:app` se de loi import.
-- Cach dung: chay tu `backend/api` voi `app.main:app` nhu lenh o tren.
-- Khong dung `uv run uvicorn main:app --reload` trong `backend/api/app`.
+Xem chi tiết: [`docs/`](./docs/) và [`project_map.md`](./project_map.md).
 
-### 9) Transaction APIs (Phase 3 baseline)
+---
 
-Sau khi dang nhap (cookie `pfa_session` da duoc set), co the goi:
+## Roadmap Status
 
-- `POST /api/v1/transactions` - tao transaction (manual entry hoac tu OCR draft).
-  Body toi thieu:
+- [x] **Phase 0**: Foundation (monorepo, infra, CI)
+- [x] **Phase 1**: Auth & session
+- [x] **Phase 2**: Receipt upload + OCR pipeline
+- [x] **Phase 3**: Transactions CRUD + review form
+- [x] **Phase 4**: Dashboard analytics
+- [x] **Phase 5**: Budgets
+- [x] **Phase 6**: AI Chatbot (function calling, SSE streaming)
+- [x] **Phase 7**: RAG Extension (pgvector + LLM Vision OCR)
+- [x] **Phase 8**: UI Redesign (DESIGN.md)
+- [ ] **Phase 9**: Hardening, UAT & Release
+- [ ] **Phase 10**: Post-MVP (export, chat memory RAG, knowledge base)
 
-  ```json
-  {
-    "amount": "125000.00",
-    "currency": "VND",
-    "transaction_date": "2026-04-01",
-    "merchant_name": "Pho 24",
-    "category_id": 3,
-    "note": "Lunch with team"
-  }
-  ```
+Chi tiết mỗi phase: [`tasks/phase-N-*.md`](./tasks/).
 
-  Optional `receipt_upload_id` de link voi receipt da OCR; phai thuoc cung user.
+---
 
-- `GET /api/v1/transactions` - list transaction co filter:
+## License
 
-  | Query param | Mo ta |
-  | --- | --- |
-  | `start_date` | ISO date, transaction tu ngay nay tro di |
-  | `end_date` | ISO date, transaction den het ngay nay |
-  | `category_id` | Loc theo category, > 0 |
-  | `merchant` | Substring match (case-insensitive) cho `merchant_name` |
-  | `page` | Default `1`, >= 1 |
-  | `size` | Default `20`, max `100` |
-
-  Response shape:
-
-  ```json
-  {
-    "items": [{ "id": 1, "amount": "125000.00", "...": "..." }],
-    "meta": { "total": 42, "page": 1, "size": 20 }
-  }
-  ```
-
-- `PUT /api/v1/transactions/{id}` - update partial (chi cac field gui len). Bao ve ownership + category access; neu update merchant + category, service tu dong remember mapping cho lan OCR sau.
-- `DELETE /api/v1/transactions/{id}` - xoa transaction (return 204). Yeu cau ownership.
-
-### 10) Dashboard Analytics API (Phase 4)
-
-Sau khi dang nhap, goi:
-
-- `GET /api/v1/dashboard/summary` - tra tong hop chi tieu cho 1 khoang thoi gian + so sanh ky truoc.
-
-  Query params:
-
-  | Query param | Mo ta |
-  | --- | --- |
-  | `range` | Preset: `7d` \| `30d` (default) \| `this_month` \| `last_month` \| `custom` |
-  | `start_date` | ISO date, **bat buoc** khi `range=custom` |
-  | `end_date` | ISO date, **bat buoc** khi `range=custom` |
-  | `top_categories_limit` | Default `5`, max `20` |
-  | `recent_transactions_limit` | Default `5`, max `50` |
-
-  Response shape (rut gon):
-
-  ```json
-  {
-    "range": { "preset": "30d", "start": "2026-03-27", "end": "2026-04-25", "days": 30 },
-    "previous_range": { "preset": "30d", "start": "2026-02-25", "end": "2026-03-26", "days": 30 },
-    "current":  { "total_spend": "400000.00", "transaction_count": 5 },
-    "previous": { "total_spend": "165000.00", "transaction_count": 3 },
-    "delta_amount":  "235000.00",
-    "delta_percent": 142.42,
-    "top_categories": [
-      { "category_id": 1, "name": "An uong", "color": "#f59e0b", "total_amount": "185000.00", "transaction_count": 2, "percentage": 46.25 }
-    ],
-    "recent_transactions": [
-      { "id": 12, "merchant_name": "Pho 24", "amount": "65000.00", "currency": "VND", "transaction_date": "2026-04-13", "category_id": 1, "category_name": "An uong" }
-    ]
-  }
-  ```
-
-  - `delta_percent` la `null` khi `previous.total_spend = 0` (khong the chia 0; UI render "-").
-  - Giao dich khong co category gop vao nhom "Chua phan loai" trong `top_categories`.
-  - Status code: `200` khi success (ke ca empty), `400` neu preset/custom invalid, `401` chua auth, `422` khi limit vuot cap.
-
-## Current Status
-
-- [x] Phase 0: Foundation
-- [x] Phase 1: Auth and session
-- [x] Phase 2: Receipt upload and OCR pipeline baseline
-- [x] Phase 3: Transactions and review (manual entry + history + receipt review form)
-- [x] Phase 4: Dashboard analytics (date_ranges + analytics service + summary API + UI shell + chart + previous period compare)
-- [ ] Phase 5: Goals and budgets (planned)
-- [x] Milestone M5: Tech debt cleanup (JWT fail-fast, lifespan broker, deep health check, S3/MinIO storage, SQLModel worker)
+Internal project.
