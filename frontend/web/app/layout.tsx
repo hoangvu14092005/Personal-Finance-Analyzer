@@ -31,6 +31,7 @@ export default function RootLayout({
   return (
     <html lang="vi">
       <body
+        suppressHydrationWarning
         className={`${ibmPlex.variable} ${jetbrainsMono.variable} antialiased bg-canvas text-body`}
       >
         <div className="min-h-screen flex flex-col">

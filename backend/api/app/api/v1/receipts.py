@@ -11,9 +11,12 @@ from app.core.config import get_settings
 from app.core.database import get_session
 from app.dependencies.auth import get_current_user
 from app.integrations.storage import get_storage_service
-from app.models.entities import OcrResult, ReceiptUpload, User
+from app.models.entities import Invoice, InvoiceLineItem, OcrResult, ReceiptLineItem, ReceiptUpload, User
 from app.schemas.receipts import (
     DraftReviewResponse,
+    InvoiceLineItemResponse,
+    InvoiceResponse,
+    LineItemResponse,
     OcrResultResponse,
     ReceiptStatusResponse,
     ReceiptUploadResponse,
@@ -150,6 +153,7 @@ def get_receipt_draft(
 
     Frontend dùng response này render review form đã pre-fill amount/merchant/
     date/currency từ OCR + suggested category từ user merchant mapping.
+    When Invoice exists, prefer its data over OcrResult normalized_payload.
     """
     if current_user.id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
@@ -168,15 +172,117 @@ def get_receipt_draft(
         user_id=current_user.id,
     )
 
+    # Check if Invoice exists and prefer its data
+    invoice = session.exec(
+        select(Invoice).where(Invoice.receipt_upload_id == receipt_id),
+    ).first()
+
+    merchant_name = draft.merchant_name
+    amount = draft.amount
+    transaction_date = draft.transaction_date
+    currency = draft.currency
+
+    if invoice is not None:
+        if invoice.seller_name:
+            merchant_name = invoice.seller_name
+        if invoice.grand_total is not None:
+            amount = invoice.grand_total
+        if invoice.issue_date is not None:
+            transaction_date = invoice.issue_date
+        if invoice.currency:
+            currency = invoice.currency
+
+    # Load line items
+    line_items = session.exec(
+        select(ReceiptLineItem)
+        .where(ReceiptLineItem.receipt_upload_id == receipt_id)
+        .order_by(ReceiptLineItem.line_number),
+    ).all()
+
     return DraftReviewResponse(
         receipt_id=draft.receipt_id,
         receipt_status=draft.receipt_status,
         provider=draft.provider,
         confidence=draft.confidence,
-        merchant_name=draft.merchant_name,
-        transaction_date=draft.transaction_date,
-        amount=draft.amount,
-        currency=draft.currency,
+        merchant_name=merchant_name,
+        transaction_date=transaction_date,
+        amount=amount,
+        currency=currency,
         suggested_category_id=draft.suggested_category_id,
         raw_text=draft.raw_text,
+        line_items=[
+            LineItemResponse(
+                id=item.id or 0,
+                line_number=item.line_number,
+                item_name=item.item_name,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+                total_price=item.total_price,
+                category_id=item.category_id,
+            )
+            for item in line_items
+        ],
+    )
+
+
+@router.get("/{receipt_id}/invoice", response_model=InvoiceResponse)
+def get_receipt_invoice(
+    receipt_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> InvoiceResponse:
+    """Return full invoice data with nested line items."""
+    if current_user.id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+
+    _ensure_receipt_owner(session, receipt_id, current_user.id)
+
+    invoice = session.exec(
+        select(Invoice).where(Invoice.receipt_upload_id == receipt_id),
+    ).first()
+    if invoice is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+
+    line_items = session.exec(
+        select(InvoiceLineItem)
+        .where(InvoiceLineItem.invoice_id == invoice.id)
+        .order_by(InvoiceLineItem.line_number),
+    ).all()
+
+    return InvoiceResponse(
+        id=invoice.id or 0,
+        receipt_upload_id=invoice.receipt_upload_id,
+        invoice_number=invoice.invoice_number,
+        template_symbol=invoice.template_symbol,
+        issue_date=invoice.issue_date,
+        tax_lookup_code=invoice.tax_lookup_code,
+        currency=invoice.currency,
+        seller_name=invoice.seller_name,
+        seller_tax_id=invoice.seller_tax_id,
+        seller_address=invoice.seller_address,
+        buyer_name=invoice.buyer_name,
+        buyer_tax_id=invoice.buyer_tax_id,
+        buyer_address=invoice.buyer_address,
+        payment_method=invoice.payment_method,
+        subtotal_before_tax=invoice.subtotal_before_tax,
+        total_tax=invoice.total_tax,
+        grand_total=invoice.grand_total,
+        amount_in_words=invoice.amount_in_words,
+        digital_signature=invoice.digital_signature,
+        signing_date=invoice.signing_date,
+        lookup_link=invoice.lookup_link,
+        line_items=[
+            InvoiceLineItemResponse(
+                id=item.id or 0,
+                line_number=item.line_number,
+                item_name=item.item_name,
+                unit=item.unit,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+                line_total=item.line_total,
+                vat_rate=item.vat_rate,
+                vat_amount=item.vat_amount,
+            )
+            for item in line_items
+        ],
     )

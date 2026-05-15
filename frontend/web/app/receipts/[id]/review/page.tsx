@@ -6,7 +6,7 @@ import { FormEvent, use, useEffect, useMemo, useState } from "react";
 
 import { getMe } from "@/lib/auth-api";
 import { Category, listCategories } from "@/lib/categories-api";
-import { DraftReview, getReceiptDraft } from "@/lib/receipts-api";
+import { DraftReview, getReceiptDraft, getReceiptInvoice, InvoiceData } from "@/lib/receipts-api";
 import { createTransaction } from "@/lib/transactions-api";
 import {
   Button,
@@ -64,6 +64,7 @@ export default function ReceiptReviewPage({
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftReview | null>(null);
+  const [invoice, setInvoice] = useState<InvoiceData | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [form, setForm] = useState<ReviewFormState>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
@@ -105,6 +106,14 @@ export default function ReceiptReviewPage({
         setDraft(draftResponse);
         setCategories(categoriesResponse.items);
         setForm(draftToForm(draftResponse));
+
+        // Try to load full invoice data (may not exist for old receipts)
+        try {
+          const invoiceResponse = await getReceiptInvoice(receiptId);
+          if (!cancelled) setInvoice(invoiceResponse);
+        } catch {
+          // Invoice not found is OK - old receipts won't have it
+        }
       } catch (error) {
         if (cancelled) return;
         setLoadError(
@@ -345,6 +354,105 @@ export default function ReceiptReviewPage({
           </div>
         </form>
       </Card>
+
+      {/* Invoice Details Section */}
+      {invoice ? (
+        <Card>
+          <div className="space-y-4">
+            <h2 className="text-body-md font-semibold text-ink">Chi tiết hóa đơn điện tử</h2>
+
+            {/* Invoice Metadata */}
+            <div className="grid gap-2 md:grid-cols-2 text-body-sm">
+              <div><span className="text-mute">Số hóa đơn:</span> {invoice.invoice_number ?? <span className="text-mute italic">—</span>}</div>
+              <div><span className="text-mute">Mẫu số/Ký hiệu:</span> {invoice.template_symbol ?? <span className="text-mute italic">—</span>}</div>
+              <div><span className="text-mute">Ngày lập:</span> {invoice.issue_date ?? <span className="text-mute italic">—</span>}</div>
+              <div><span className="text-mute">Mã tra cứu:</span> {invoice.tax_lookup_code ?? <span className="text-mute italic">—</span>}</div>
+              <div><span className="text-mute">Loại tiền tệ:</span> {invoice.currency}</div>
+            </div>
+
+            {/* Seller */}
+            <div className="border-t border-hairline pt-3">
+              <h3 className="text-body-xs font-semibold text-mute uppercase mb-2">Người bán</h3>
+              <div className="grid gap-1 text-body-sm">
+                <div><span className="text-mute">Tên:</span> {invoice.seller_name ?? <span className="text-mute italic">—</span>}</div>
+                <div><span className="text-mute">MST:</span> {invoice.seller_tax_id ?? <span className="text-mute italic">—</span>}</div>
+                <div><span className="text-mute">Địa chỉ:</span> {invoice.seller_address ?? <span className="text-mute italic">—</span>}</div>
+              </div>
+            </div>
+
+            {/* Buyer */}
+            <div className="border-t border-hairline pt-3">
+              <h3 className="text-body-xs font-semibold text-mute uppercase mb-2">Người mua</h3>
+              <div className="grid gap-1 text-body-sm">
+                <div><span className="text-mute">Tên:</span> {invoice.buyer_name ?? <span className="text-mute italic">—</span>}</div>
+                <div><span className="text-mute">MST:</span> {invoice.buyer_tax_id ?? <span className="text-mute italic">—</span>}</div>
+                <div><span className="text-mute">Địa chỉ:</span> {invoice.buyer_address ?? <span className="text-mute italic">—</span>}</div>
+                <div><span className="text-mute">Hình thức TT:</span> {invoice.payment_method ?? <span className="text-mute italic">—</span>}</div>
+              </div>
+            </div>
+
+            {/* Line Items Table */}
+            {invoice.line_items.length > 0 ? (
+              <div className="border-t border-hairline pt-3">
+                <h3 className="text-body-xs font-semibold text-mute uppercase mb-2">Chi tiết hàng hóa / dịch vụ</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-body-sm">
+                    <thead>
+                      <tr className="border-b border-hairline text-left text-mute">
+                        <th className="py-2 pr-2">#</th>
+                        <th className="py-2 pr-2">Tên hàng hóa</th>
+                        <th className="py-2 pr-2">ĐVT</th>
+                        <th className="py-2 pr-2 text-right">SL</th>
+                        <th className="py-2 pr-2 text-right">Đơn giá</th>
+                        <th className="py-2 pr-2 text-right">Thành tiền</th>
+                        <th className="py-2 pr-2 text-right">VAT %</th>
+                        <th className="py-2 text-right">Tiền thuế</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invoice.line_items.map((item) => (
+                        <tr key={item.id} className="border-b border-hairline/50">
+                          <td className="py-2 pr-2 text-mute">{item.line_number + 1}</td>
+                          <td className="py-2 pr-2">{item.item_name}</td>
+                          <td className="py-2 pr-2">{item.unit ?? "—"}</td>
+                          <td className="py-2 pr-2 text-right">{item.quantity}</td>
+                          <td className="py-2 pr-2 text-right">{Number(item.unit_price).toLocaleString("vi-VN")}</td>
+                          <td className="py-2 pr-2 text-right">{Number(item.line_total).toLocaleString("vi-VN")}</td>
+                          <td className="py-2 pr-2 text-right">{item.vat_rate ? `${item.vat_rate}%` : "—"}</td>
+                          <td className="py-2 text-right">{item.vat_amount ? Number(item.vat_amount).toLocaleString("vi-VN") : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            {/* Totals */}
+            <div className="border-t border-hairline pt-3">
+              <h3 className="text-body-xs font-semibold text-mute uppercase mb-2">Tổng cộng</h3>
+              <div className="grid gap-1 text-body-sm">
+                <div className="flex justify-between"><span className="text-mute">Tổng trước thuế:</span> <span>{invoice.subtotal_before_tax ? Number(invoice.subtotal_before_tax).toLocaleString("vi-VN") + " " + invoice.currency : "—"}</span></div>
+                <div className="flex justify-between"><span className="text-mute">Tổng tiền thuế:</span> <span>{invoice.total_tax ? Number(invoice.total_tax).toLocaleString("vi-VN") + " " + invoice.currency : "—"}</span></div>
+                <div className="flex justify-between font-semibold"><span>Tổng thanh toán:</span> <span>{invoice.grand_total ? Number(invoice.grand_total).toLocaleString("vi-VN") + " " + invoice.currency : "—"}</span></div>
+                {invoice.amount_in_words ? <div className="text-mute italic text-caption-sm">{invoice.amount_in_words}</div> : null}
+              </div>
+            </div>
+
+            {/* Authentication */}
+            {(invoice.digital_signature || invoice.signing_date || invoice.lookup_link) ? (
+              <div className="border-t border-hairline pt-3">
+                <h3 className="text-body-xs font-semibold text-mute uppercase mb-2">Xác thực</h3>
+                <div className="grid gap-1 text-body-sm">
+                  {invoice.signing_date ? <div><span className="text-mute">Ngày ký:</span> {invoice.signing_date}</div> : null}
+                  {invoice.digital_signature ? <div><span className="text-mute">Chữ ký số:</span> <span className="text-accent-green">✓ Có</span></div> : null}
+                  {invoice.lookup_link ? <div><span className="text-mute">Tra cứu:</span> <a href={invoice.lookup_link} target="_blank" rel="noopener noreferrer" className="text-link-teal hover:underline">{invoice.lookup_link}</a></div> : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
 
       {draft?.raw_text ? (
         <details className="rounded-md border border-hairline bg-surface-dark p-4 text-body-sm text-on-dark">

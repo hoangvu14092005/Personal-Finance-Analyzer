@@ -55,7 +55,9 @@ class TransactionResponse(BaseModel):
     id: int
     user_id: int
     category_id: int | None
+    category_name: str | None
     receipt_upload_id: int | None
+    has_invoice: bool
     merchant_name: str | None
     amount: Decimal
     currency: str

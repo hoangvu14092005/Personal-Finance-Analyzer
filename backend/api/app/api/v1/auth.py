@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlmodel import Session, select
 
 from app.core.database import get_session
+from app.core.logging import get_logger
 from app.core.security import clear_auth_cookie, create_access_token, set_auth_cookie
 from app.dependencies.auth import get_current_user
 from app.models.entities import User
@@ -11,6 +12,7 @@ from app.schemas.auth import AuthResponse, LoginRequest, ProfileResponse, Regist
 from app.services.password_service import hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = get_logger(__name__)
 
 
 def to_profile_response(user: User) -> ProfileResponse:
@@ -30,28 +32,60 @@ def to_profile_response(user: User) -> ProfileResponse:
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def register(
     payload: RegisterRequest,
+    response: Response,
     session: Session = Depends(get_session), 
 ) -> AuthResponse:
-    existing_user = session.exec(select(User).where(User.email == payload.email)).first()
-    if existing_user is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
+    logger.info("Register attempt for email: %s", payload.email)
+    
+    try:
+        logger.debug("Checking if user exists...")
+        existing_user = session.exec(select(User).where(User.email == payload.email)).first()
+        if existing_user is not None:
+            logger.warning("Email already registered: %s", payload.email)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already registered",
+            )
+
+        logger.debug("Hashing password...")
+        password_hash = hash_password(payload.password)
+        
+        logger.debug("Creating user...")
+        user = User(
+            email=payload.email,
+            password_hash=password_hash,
+            full_name=payload.full_name,
+            currency=payload.currency,
+            timezone=payload.timezone,
+            locale=payload.locale,
         )
+        session.add(user)
+        
+        logger.debug("Committing to database...")
+        session.commit()
+        session.refresh(user)
+        logger.info("User created successfully: %s", user.email)
 
-    user = User(
-        email=payload.email,
-        password_hash=hash_password(payload.password),
-        full_name=payload.full_name,
-        currency=payload.currency,
-        timezone=payload.timezone,
-        locale=payload.locale,
-    )
-    session.add(user)
-    session.commit()
-    session.refresh(user)
+        if user.id is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Invalid user profile",
+            )
 
-    return AuthResponse(user=to_profile_response(user))
+        logger.debug("Creating access token...")
+        access_token = create_access_token(user_id=user.id, email=user.email)
+        set_auth_cookie(response, access_token)
+
+        logger.info("Registration successful for: %s", user.email)
+        return AuthResponse(user=to_profile_response(user))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Registration failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Registration failed: {str(e)}",
+        )
 
 
 @router.post("/login", response_model=AuthResponse)

@@ -15,7 +15,8 @@ from sqlmodel import Session, col, func, select
 
 from app.core.database import get_session
 from app.dependencies.auth import get_current_user
-from app.models.entities import Category, ReceiptUpload, Transaction, User
+from app.models.entities import Category, Invoice, InvoiceLineItem, ReceiptUpload, Transaction, User
+from app.schemas.receipts import InvoiceLineItemResponse, InvoiceResponse
 from app.schemas.transactions import (
     TransactionCreate,
     TransactionListMeta,
@@ -41,7 +42,12 @@ DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
 
 
-def _to_response(transaction: Transaction) -> TransactionResponse:
+def _to_response(
+    transaction: Transaction,
+    *,
+    has_invoice: bool = False,
+    category_name: str | None = None,
+) -> TransactionResponse:
     if transaction.id is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -52,7 +58,9 @@ def _to_response(transaction: Transaction) -> TransactionResponse:
         id=transaction.id,
         user_id=transaction.user_id,
         category_id=transaction.category_id,
+        category_name=category_name,
         receipt_upload_id=transaction.receipt_upload_id,
+        has_invoice=has_invoice,
         merchant_name=transaction.merchant_name,
         amount=transaction.amount,
         currency=transaction.currency,
@@ -229,8 +237,30 @@ def list_transactions(
     )
     rows = session.exec(paged_query).all()
 
+    # Enrich with category_name and has_invoice
+    enriched_items: list[TransactionResponse] = []
+    for tx in rows:
+        # Resolve category name
+        cat_name: str | None = None
+        if tx.category_id is not None:
+            cat = session.get(Category, tx.category_id)
+            if cat is not None:
+                cat_name = cat.name
+
+        # Check if invoice exists for this transaction's receipt
+        has_inv = False
+        if tx.receipt_upload_id is not None:
+            inv = session.exec(
+                select(Invoice).where(Invoice.receipt_upload_id == tx.receipt_upload_id),
+            ).first()
+            has_inv = inv is not None
+
+        enriched_items.append(
+            _to_response(tx, has_invoice=has_inv, category_name=cat_name)
+        )
+
     return TransactionListResponse(
-        items=[_to_response(row) for row in rows],
+        items=enriched_items,
         meta=TransactionListMeta(total=int(total), page=page, size=size),
     )
 
@@ -331,3 +361,78 @@ def delete_transaction(
     session.commit()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{transaction_id}/invoice", response_model=InvoiceResponse)
+def get_transaction_invoice(
+    transaction_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> InvoiceResponse:
+    """Return full invoice data for a transaction's associated receipt."""
+    if current_user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user",
+        )
+
+    transaction = _ensure_transaction_owner(session, transaction_id, current_user.id)
+
+    if transaction.receipt_upload_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invoice not found",
+        )
+
+    invoice = session.exec(
+        select(Invoice).where(Invoice.receipt_upload_id == transaction.receipt_upload_id),
+    ).first()
+    if invoice is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invoice not found",
+        )
+
+    line_items = session.exec(
+        select(InvoiceLineItem)
+        .where(InvoiceLineItem.invoice_id == invoice.id)
+        .order_by(InvoiceLineItem.line_number),
+    ).all()
+
+    return InvoiceResponse(
+        id=invoice.id or 0,
+        receipt_upload_id=invoice.receipt_upload_id,
+        invoice_number=invoice.invoice_number,
+        template_symbol=invoice.template_symbol,
+        issue_date=invoice.issue_date,
+        tax_lookup_code=invoice.tax_lookup_code,
+        currency=invoice.currency,
+        seller_name=invoice.seller_name,
+        seller_tax_id=invoice.seller_tax_id,
+        seller_address=invoice.seller_address,
+        buyer_name=invoice.buyer_name,
+        buyer_tax_id=invoice.buyer_tax_id,
+        buyer_address=invoice.buyer_address,
+        payment_method=invoice.payment_method,
+        subtotal_before_tax=invoice.subtotal_before_tax,
+        total_tax=invoice.total_tax,
+        grand_total=invoice.grand_total,
+        amount_in_words=invoice.amount_in_words,
+        digital_signature=invoice.digital_signature,
+        signing_date=invoice.signing_date,
+        lookup_link=invoice.lookup_link,
+        line_items=[
+            InvoiceLineItemResponse(
+                id=item.id or 0,
+                line_number=item.line_number,
+                item_name=item.item_name,
+                unit=item.unit,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+                line_total=item.line_total,
+                vat_rate=item.vat_rate,
+                vat_amount=item.vat_amount,
+            )
+            for item in line_items
+        ],
+    )

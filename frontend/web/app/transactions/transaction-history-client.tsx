@@ -6,13 +6,16 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { getMe } from "@/lib/auth-api";
 import {
+  InvoiceData,
   Transaction,
   TransactionListFilters,
   TransactionListMeta,
   deleteTransaction,
+  getTransactionInvoice,
   listTransactions,
 } from "@/lib/transactions-api";
 import {
+  Badge,
   Button,
   CalloutBanner,
   Card,
@@ -52,6 +55,161 @@ function formatAmount(amount: string, currency: string): string {
   return `${numeric.toLocaleString("vi-VN", { maximumFractionDigits: 2 })} ${currency}`;
 }
 
+function InvoiceDetailView({
+  transactionId,
+  hasInvoice,
+}: {
+  transactionId: number;
+  hasInvoice: boolean;
+}) {
+  const [invoice, setInvoice] = useState<InvoiceData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!hasInvoice) {
+      setIsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const data = await getTransactionInvoice(transactionId);
+        if (!cancelled) setInvoice(data);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Không tải được hóa đơn.");
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [transactionId, hasInvoice]);
+
+  if (isLoading) {
+    return (
+      <div className="px-4 py-6 text-body-sm text-mute">
+        Đang tải chi tiết hóa đơn...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="px-4 py-4">
+        <CalloutBanner severity="warning">{error}</CalloutBanner>
+      </div>
+    );
+  }
+
+  if (!invoice) {
+    return (
+      <div className="px-4 py-4 text-body-sm text-mute">
+        Giao dịch này không có hóa đơn điện tử đính kèm.
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-4 py-4 space-y-4 bg-surface-soft/30">
+      <h3 className="text-body-md font-semibold text-ink">Chi tiết hóa đơn điện tử</h3>
+
+      {/* Invoice Metadata */}
+      <div className="grid gap-2 md:grid-cols-2 text-body-sm">
+        <div><span className="text-mute">Số hóa đơn:</span> {invoice.invoice_number ?? <span className="text-mute italic">—</span>}</div>
+        <div><span className="text-mute">Mẫu số/Ký hiệu:</span> {invoice.template_symbol ?? <span className="text-mute italic">—</span>}</div>
+        <div><span className="text-mute">Ngày lập:</span> {invoice.issue_date ?? <span className="text-mute italic">—</span>}</div>
+        <div><span className="text-mute">Mã tra cứu:</span> {invoice.tax_lookup_code ?? <span className="text-mute italic">—</span>}</div>
+        <div><span className="text-mute">Loại tiền tệ:</span> {invoice.currency}</div>
+      </div>
+
+      {/* Seller */}
+      <div className="border-t border-hairline pt-3">
+        <h4 className="text-body-xs font-semibold text-mute uppercase mb-2">Người bán</h4>
+        <div className="grid gap-1 text-body-sm">
+          <div><span className="text-mute">Tên:</span> {invoice.seller_name ?? <span className="text-mute italic">—</span>}</div>
+          <div><span className="text-mute">MST:</span> {invoice.seller_tax_id ?? <span className="text-mute italic">—</span>}</div>
+          <div><span className="text-mute">Địa chỉ:</span> {invoice.seller_address ?? <span className="text-mute italic">—</span>}</div>
+        </div>
+      </div>
+
+      {/* Buyer */}
+      <div className="border-t border-hairline pt-3">
+        <h4 className="text-body-xs font-semibold text-mute uppercase mb-2">Người mua</h4>
+        <div className="grid gap-1 text-body-sm">
+          <div><span className="text-mute">Tên:</span> {invoice.buyer_name ?? <span className="text-mute italic">—</span>}</div>
+          <div><span className="text-mute">MST:</span> {invoice.buyer_tax_id ?? <span className="text-mute italic">—</span>}</div>
+          <div><span className="text-mute">Địa chỉ:</span> {invoice.buyer_address ?? <span className="text-mute italic">—</span>}</div>
+          <div><span className="text-mute">Hình thức TT:</span> {invoice.payment_method ?? <span className="text-mute italic">—</span>}</div>
+        </div>
+      </div>
+
+      {/* Line Items Table */}
+      {invoice.line_items.length > 0 ? (
+        <div className="border-t border-hairline pt-3">
+          <h4 className="text-body-xs font-semibold text-mute uppercase mb-2">Chi tiết hàng hóa / dịch vụ</h4>
+          <div className="overflow-x-auto">
+            <table className="w-full text-body-sm">
+              <thead>
+                <tr className="border-b border-hairline text-left text-mute">
+                  <th className="py-2 pr-2">#</th>
+                  <th className="py-2 pr-2">Tên hàng hóa</th>
+                  <th className="py-2 pr-2">ĐVT</th>
+                  <th className="py-2 pr-2 text-right">SL</th>
+                  <th className="py-2 pr-2 text-right">Đơn giá</th>
+                  <th className="py-2 pr-2 text-right">Thành tiền</th>
+                  <th className="py-2 pr-2 text-right">VAT %</th>
+                  <th className="py-2 text-right">Tiền thuế</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoice.line_items.map((item) => (
+                  <tr key={item.id} className="border-b border-hairline/50">
+                    <td className="py-2 pr-2 text-mute">{item.line_number + 1}</td>
+                    <td className="py-2 pr-2">{item.item_name}</td>
+                    <td className="py-2 pr-2">{item.unit ?? "—"}</td>
+                    <td className="py-2 pr-2 text-right">{item.quantity}</td>
+                    <td className="py-2 pr-2 text-right">{Number(item.unit_price).toLocaleString("vi-VN")}</td>
+                    <td className="py-2 pr-2 text-right">{Number(item.line_total).toLocaleString("vi-VN")}</td>
+                    <td className="py-2 pr-2 text-right">{item.vat_rate ? `${item.vat_rate}%` : "—"}</td>
+                    <td className="py-2 text-right">{item.vat_amount ? Number(item.vat_amount).toLocaleString("vi-VN") : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Totals */}
+      <div className="border-t border-hairline pt-3">
+        <h4 className="text-body-xs font-semibold text-mute uppercase mb-2">Tổng cộng</h4>
+        <div className="grid gap-1 text-body-sm">
+          <div className="flex justify-between"><span className="text-mute">Tổng trước thuế:</span> <span>{invoice.subtotal_before_tax ? Number(invoice.subtotal_before_tax).toLocaleString("vi-VN") + " " + invoice.currency : "—"}</span></div>
+          <div className="flex justify-between"><span className="text-mute">Tổng tiền thuế:</span> <span>{invoice.total_tax ? Number(invoice.total_tax).toLocaleString("vi-VN") + " " + invoice.currency : "—"}</span></div>
+          <div className="flex justify-between font-semibold"><span>Tổng thanh toán:</span> <span>{invoice.grand_total ? Number(invoice.grand_total).toLocaleString("vi-VN") + " " + invoice.currency : "—"}</span></div>
+          {invoice.amount_in_words ? <div className="text-mute italic text-caption-sm">{invoice.amount_in_words}</div> : null}
+        </div>
+      </div>
+
+      {/* Authentication */}
+      {(invoice.digital_signature || invoice.signing_date || invoice.lookup_link) ? (
+        <div className="border-t border-hairline pt-3">
+          <h4 className="text-body-xs font-semibold text-mute uppercase mb-2">Xác thực</h4>
+          <div className="grid gap-1 text-body-sm">
+            {invoice.signing_date ? <div><span className="text-mute">Ngày ký:</span> {invoice.signing_date}</div> : null}
+            {invoice.digital_signature ? <div><span className="text-mute">Chữ ký số:</span> <span className="text-accent-green">✓ Có</span></div> : null}
+            {invoice.lookup_link ? <div><span className="text-mute">Tra cứu:</span> <a href={invoice.lookup_link} target="_blank" rel="noopener noreferrer" className="text-link-teal hover:underline">{invoice.lookup_link}</a></div> : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function TransactionHistoryClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -67,6 +225,7 @@ export function TransactionHistoryClient() {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(
     createdId ? `Đã lưu giao dịch #${createdId}.` : null,
   );
@@ -136,6 +295,7 @@ export function TransactionHistoryClient() {
     try {
       await deleteTransaction(id);
       setStatusMessage(`Đã xóa giao dịch #${id}.`);
+      setExpandedId(null);
       await fetchList(appliedFilters, page);
     } catch (error) {
       setErrorMessage(
@@ -144,6 +304,10 @@ export function TransactionHistoryClient() {
     } finally {
       setDeletingId(null);
     }
+  };
+
+  const onRowClick = (id: number) => {
+    setExpandedId((prev) => (prev === id ? null : id));
   };
 
   const totalPages = useMemo(() => {
@@ -247,6 +411,7 @@ export function TransactionHistoryClient() {
                 <tr>
                   <th className="px-4 py-3">Ngày</th>
                   <th className="px-4 py-3">Merchant</th>
+                  <th className="px-4 py-3">Danh mục</th>
                   <th className="px-4 py-3 text-right">Số tiền</th>
                   <th className="px-4 py-3">Ghi chú</th>
                   <th className="px-4 py-3 text-right">Hành động</th>
@@ -254,33 +419,14 @@ export function TransactionHistoryClient() {
               </thead>
               <tbody className="divide-y divide-hairline-soft">
                 {items.map((transaction) => (
-                  <tr key={transaction.id} className="hover:bg-surface-soft/50">
-                    <td className="px-4 py-3 font-mono text-caption-sm text-body">
-                      {transaction.transaction_date}
-                    </td>
-                    <td className="px-4 py-3 text-ink">
-                      {transaction.merchant_name ?? (
-                        <span className="text-ash">Không có</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold text-ink">
-                      {formatAmount(transaction.amount, transaction.currency)}
-                    </td>
-                    <td className="px-4 py-3 text-body">
-                      {transaction.note ?? <span className="text-ash">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Button
-                        type="button"
-                        variant="danger"
-                        size="sm"
-                        onClick={() => onDelete(transaction.id)}
-                        disabled={deletingId === transaction.id}
-                      >
-                        {deletingId === transaction.id ? "Đang xóa..." : "Xóa"}
-                      </Button>
-                    </td>
-                  </tr>
+                  <TransactionRow
+                    key={transaction.id}
+                    transaction={transaction}
+                    isExpanded={expandedId === transaction.id}
+                    isDeleting={deletingId === transaction.id}
+                    onRowClick={onRowClick}
+                    onDelete={onDelete}
+                  />
                 ))}
               </tbody>
             </table>
@@ -326,5 +472,77 @@ export function TransactionHistoryClient() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function TransactionRow({
+  transaction,
+  isExpanded,
+  isDeleting,
+  onRowClick,
+  onDelete,
+}: {
+  transaction: Transaction;
+  isExpanded: boolean;
+  isDeleting: boolean;
+  onRowClick: (id: number) => void;
+  onDelete: (id: number) => void;
+}) {
+  return (
+    <>
+      <tr
+        className={`cursor-pointer hover:bg-surface-soft/50 ${isExpanded ? "bg-surface-soft/30" : ""}`}
+        onClick={() => onRowClick(transaction.id)}
+      >
+        <td className="px-4 py-3 font-mono text-caption-sm text-body">
+          {transaction.transaction_date}
+        </td>
+        <td className="px-4 py-3 text-ink">
+          <div className="flex items-center gap-2">
+            {transaction.merchant_name ?? (
+              <span className="text-ash">Không có</span>
+            )}
+            {transaction.has_invoice ? (
+              <Badge tone="green" aria-label="Có hóa đơn">HĐ</Badge>
+            ) : null}
+          </div>
+        </td>
+        <td className="px-4 py-3 text-body">
+          {transaction.category_name ?? (
+            <span className="text-ash">Chưa phân loại</span>
+          )}
+        </td>
+        <td className="px-4 py-3 text-right font-semibold text-ink">
+          {formatAmount(transaction.amount, transaction.currency)}
+        </td>
+        <td className="px-4 py-3 text-body">
+          {transaction.note ?? <span className="text-ash">—</span>}
+        </td>
+        <td className="px-4 py-3 text-right">
+          <Button
+            type="button"
+            variant="danger"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(transaction.id);
+            }}
+            disabled={isDeleting}
+          >
+            {isDeleting ? "Đang xóa..." : "Xóa"}
+          </Button>
+        </td>
+      </tr>
+      {isExpanded ? (
+        <tr>
+          <td colSpan={6} className="p-0 border-t border-hairline">
+            <InvoiceDetailView
+              transactionId={transaction.id}
+              hasInvoice={transaction.has_invoice}
+            />
+          </td>
+        </tr>
+      ) : null}
+    </>
   );
 }

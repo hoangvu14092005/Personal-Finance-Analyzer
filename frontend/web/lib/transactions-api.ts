@@ -6,7 +6,9 @@ export type Transaction = {
   id: number;
   user_id: number;
   category_id: number | null;
+  category_name: string | null;
   receipt_upload_id: number | null;
+  has_invoice: boolean;
   merchant_name: string | null;
   amount: string;
   currency: string;
@@ -133,4 +135,47 @@ export async function updateTransaction(
 
 export async function deleteTransaction(id: number): Promise<void> {
   await request<void>(`/api/v1/transactions/${id}`, { method: "DELETE" });
+}
+
+export type InvoiceLineItem = {
+  id: number;
+  line_number: number;
+  item_name: string;
+  unit: string | null;
+  quantity: string;
+  unit_price: string;
+  line_total: string;
+  vat_rate: string | null;
+  vat_amount: string | null;
+};
+
+export type InvoiceData = {
+  id: number;
+  receipt_upload_id: number;
+  invoice_number: string | null;
+  template_symbol: string | null;
+  issue_date: string | null;
+  tax_lookup_code: string | null;
+  currency: string;
+  seller_name: string | null;
+  seller_tax_id: string | null;
+  seller_address: string | null;
+  buyer_name: string | null;
+  buyer_tax_id: string | null;
+  buyer_address: string | null;
+  payment_method: string | null;
+  subtotal_before_tax: string | null;
+  total_tax: string | null;
+  grand_total: string | null;
+  amount_in_words: string | null;
+  digital_signature: string | null;
+  signing_date: string | null;
+  lookup_link: string | null;
+  line_items: InvoiceLineItem[];
+};
+
+export async function getTransactionInvoice(transactionId: number): Promise<InvoiceData> {
+  return request<InvoiceData>(`/api/v1/transactions/${transactionId}/invoice`, {
+    method: "GET",
+  });
 }

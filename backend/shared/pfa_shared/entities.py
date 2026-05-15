@@ -270,13 +270,145 @@ class ReceiptTextChunk(SQLModel, table=True):
     )
 
 
+class Invoice(SQLModel, table=True):
+    """Full Vietnamese e-invoice entity (hóa đơn điện tử).
+
+    Liên kết 1-1 với ReceiptUpload. Lưu toàn bộ thông tin hóa đơn bao gồm:
+    metadata, seller, buyer, totals, authentication/digital signature.
+    """
+
+    __tablename__ = "invoices"
+
+    id: int | None = Field(default=None, primary_key=True)
+    receipt_upload_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("receipt_uploads.id", ondelete="CASCADE"),
+            nullable=False,
+            unique=True,
+            index=True,
+        ),
+    )
+    user_id: int = Field(foreign_key="users.id", index=True)
+
+    # Invoice metadata
+    invoice_number: str | None = Field(default=None, max_length=100)
+    template_symbol: str | None = Field(default=None, max_length=50)
+    issue_date: date | None = Field(default=None)
+    tax_lookup_code: str | None = Field(default=None, max_length=100)
+    currency: str = Field(default="VND", max_length=10)
+
+    # Seller info
+    seller_name: str | None = Field(default=None, max_length=255)
+    seller_tax_id: str | None = Field(default=None, max_length=20)
+    seller_address: str | None = Field(default=None, max_length=500)
+
+    # Buyer info
+    buyer_name: str | None = Field(default=None, max_length=255)
+    buyer_tax_id: str | None = Field(default=None, max_length=20)
+    buyer_address: str | None = Field(default=None, max_length=500)
+    payment_method: str | None = Field(default=None, max_length=100)
+
+    # Totals
+    subtotal_before_tax: Decimal | None = Field(default=None, sa_column=Column(Numeric(15, 2)))
+    total_tax: Decimal | None = Field(default=None, sa_column=Column(Numeric(15, 2)))
+    grand_total: Decimal | None = Field(default=None, sa_column=Column(Numeric(15, 2)))
+    amount_in_words: str | None = Field(default=None, max_length=500)
+
+    # Authentication / digital signature
+    digital_signature: str | None = Field(default=None, max_length=500)
+    signing_date: date | None = Field(default=None)
+    lookup_link: str | None = Field(default=None, max_length=500)
+
+    created_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False),
+    )
+
+
+class InvoiceLineItem(SQLModel, table=True):
+    """Line item from Vietnamese e-invoice with VAT info.
+
+    Mỗi Invoice có nhiều InvoiceLineItem. CASCADE delete khi Invoice bị xóa.
+    """
+
+    __tablename__ = "invoice_line_items"
+
+    id: int | None = Field(default=None, primary_key=True)
+    invoice_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("invoices.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
+    )
+    line_number: int = Field(default=0)
+    item_name: str = Field(max_length=500)
+    unit: str | None = Field(default=None, max_length=50)
+    quantity: Decimal = Field(default=Decimal("1"), sa_column=Column(Numeric(10, 3), nullable=False))
+    unit_price: Decimal = Field(sa_column=Column(Numeric(15, 2), nullable=False))
+    line_total: Decimal = Field(sa_column=Column(Numeric(15, 2), nullable=False))
+
+    # VAT
+    vat_rate: Decimal | None = Field(default=None, sa_column=Column(Numeric(5, 2)))
+    vat_amount: Decimal | None = Field(default=None, sa_column=Column(Numeric(15, 2)))
+
+    created_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False),
+    )
+
+
+class ReceiptLineItem(SQLModel, table=True):
+    """Line items extracted from receipt OCR.
+    
+    Mỗi hóa đơn có thể có nhiều line items (sản phẩm/dịch vụ).
+    Tổng của tất cả line items nên bằng total_amount trong OcrResult.
+    """
+
+    __tablename__ = "receipt_line_items"
+
+    id: int | None = Field(default=None, primary_key=True)
+    receipt_upload_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("receipt_uploads.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
+    )
+    line_number: int = Field(default=0)  # Thứ tự trong hóa đơn (0-indexed)
+    item_name: str = Field(max_length=500)
+    quantity: Decimal = Field(
+        default=Decimal("1"),
+        sa_column=Column(Numeric(10, 3), nullable=False),
+    )
+    unit_price: Decimal = Field(
+        sa_column=Column(Numeric(12, 2), nullable=False),
+    )
+    total_price: Decimal = Field(
+        sa_column=Column(Numeric(12, 2), nullable=False),
+    )
+    # Category suggestion cho từng line item (optional)
+    category_id: int | None = Field(default=None, foreign_key="categories.id")
+    created_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            server_default=func.now(),
+            nullable=False,
+        ),
+    )
+
+
 __all__ = [
     "EMBEDDING_DIMENSION",
     "Budget",
     "Category",
     "ChatMessage",
     "InsightSnapshot",
+    "Invoice",
+    "InvoiceLineItem",
     "OcrResult",
+    "ReceiptLineItem",
     "ReceiptTextChunk",
     "ReceiptUpload",
     "Transaction",
