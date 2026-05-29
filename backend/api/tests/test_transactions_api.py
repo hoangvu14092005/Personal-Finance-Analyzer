@@ -9,6 +9,7 @@ from app.models.entities import (
     ReceiptUpload,
     Transaction,
     User,
+    UserMerchantAlias,
     UserMerchantMapping,
 )
 from fastapi.testclient import TestClient
@@ -142,6 +143,38 @@ def test_create_transaction_with_unowned_receipt_returns_404(
     assert response.status_code == 404
 
 
+def test_create_transaction_rejects_receipt_that_already_has_transaction(
+    engine: Engine,
+    client: TestClient,
+    auth_user: User,
+) -> None:
+    assert auth_user.id is not None
+    receipt = _seed_receipt(engine, user_id=auth_user.id)
+    with Session(engine) as session:
+        session.add(
+            Transaction(
+                user_id=auth_user.id,
+                receipt_upload_id=receipt.id,
+                amount=Decimal("10000.00"),
+                currency="VND",
+                transaction_date=date(2026, 4, 1),
+            ),
+        )
+        session.commit()
+
+    response = client.post(
+        "/api/v1/transactions",
+        json={
+            "amount": "12000.00",
+            "currency": "VND",
+            "transaction_date": "2026-04-02",
+            "receipt_upload_id": receipt.id,
+        },
+    )
+
+    assert response.status_code == 409
+
+
 def test_create_transaction_with_unowned_category_returns_404(
     engine: Engine,
     client: TestClient,
@@ -225,6 +258,17 @@ def test_create_transaction_remembers_merchant_category_mapping(
         ).all()
         assert len(mappings) == 1
         assert mappings[0].category_id == food_category.id
+
+        aliases = session.exec(
+            select(UserMerchantAlias).where(
+                UserMerchantAlias.user_id == auth_user.id,
+            ),
+        ).all()
+        assert len(aliases) == 1
+        assert aliases[0].raw_name == "Pho Hanoi"
+        assert aliases[0].normalized_name == "pho hanoi"
+        assert aliases[0].merchant_id is not None
+        assert aliases[0].category_id == food_category.id
 
 
 # -------------------- GET /transactions --------------------

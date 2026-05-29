@@ -3,10 +3,11 @@
 
 $ErrorActionPreference = "Stop"
 $ROOT = "D:\VuLapTrinh2\Personal_Finance_Analyzer"
+$ENV_FILE = "$ROOT\.env"
 
 Write-Host "==> 1/4 Starting Docker infrastructure..." -ForegroundColor Cyan
 Set-Location "$ROOT\infra\docker"
-docker compose up -d
+docker compose --env-file $ENV_FILE up -d
 
 Write-Host "==> Waiting for PostgreSQL + Redis to be healthy..." -ForegroundColor Cyan
 Start-Sleep -Seconds 6

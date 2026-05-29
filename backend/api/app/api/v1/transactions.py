@@ -3,121 +3,45 @@
 Endpoints:
 - POST   /api/v1/transactions          : tao transaction (manual entry hoac tu OCR draft)
 - GET    /api/v1/transactions          : list transaction co filter + pagination
+- GET    /api/v1/transactions/{id}     : get transaction detail
+- PATCH  /api/v1/transactions/{id}     : update transaction (partial fields)
 - PUT    /api/v1/transactions/{id}     : update transaction (partial fields)
 - DELETE /api/v1/transactions/{id}     : xoa transaction (hard delete)
 """
 from __future__ import annotations
 
+import os
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlmodel import Session, col, func, select
+from sqlmodel import Session
 
 from app.core.database import get_session
 from app.dependencies.auth import get_current_user
-from app.models.entities import Category, Invoice, InvoiceLineItem, ReceiptUpload, Transaction, User
-from app.schemas.receipts import InvoiceLineItemResponse, InvoiceResponse
+from app.models.entities import User
+from app.schemas.receipts import InvoiceResponse, ReceiptListItemResponse
 from app.schemas.transactions import (
     TransactionCreate,
-    TransactionListMeta,
     TransactionListResponse,
     TransactionResponse,
     TransactionUpdate,
 )
-from app.services.category_suggestion import (
-    remember_user_merchant_category,
-    suggest_category_for_merchant,
+from app.services.audit import record_audit_event
+from app.services.transaction_workflow import (
+    TransactionListFilters,
+    create_transaction_for_user,
+    delete_transaction_for_user,
+    get_transaction_response_for_user,
+    list_transactions_for_user,
+    transaction_invoice_response,
+    transaction_receipt_response,
+    update_transaction_for_user,
 )
-from app.services.chat.embedding_client import get_embedding_client
-
-
-def _build_search_text(merchant_name: str | None, note: str | None) -> str:
-    """Build text để embed cho semantic_search_transactions."""
-    parts = [p.strip() for p in (merchant_name, note) if p and p.strip()]
-    return " ".join(parts)
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
-
-
-def _to_response(
-    transaction: Transaction,
-    *,
-    has_invoice: bool = False,
-    category_name: str | None = None,
-) -> TransactionResponse:
-    if transaction.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Transaction id missing after persist",
-        )
-
-    return TransactionResponse(
-        id=transaction.id,
-        user_id=transaction.user_id,
-        category_id=transaction.category_id,
-        category_name=category_name,
-        receipt_upload_id=transaction.receipt_upload_id,
-        has_invoice=has_invoice,
-        merchant_name=transaction.merchant_name,
-        amount=transaction.amount,
-        currency=transaction.currency,
-        transaction_date=transaction.transaction_date,
-        note=transaction.note,
-        created_at=transaction.created_at,
-    )
-
-
-def _ensure_receipt_owner(
-    session: Session,
-    receipt_id: int,
-    user_id: int,
-) -> ReceiptUpload:
-    receipt = session.get(ReceiptUpload, receipt_id)
-    if receipt is None or receipt.user_id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Receipt not found",
-        )
-    return receipt
-
-
-def _ensure_transaction_owner(
-    session: Session,
-    transaction_id: int,
-    user_id: int,
-) -> Transaction:
-    transaction = session.get(Transaction, transaction_id)
-    if transaction is None or transaction.user_id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Transaction not found",
-        )
-    return transaction
-
-
-def _ensure_category_accessible(
-    session: Session,
-    category_id: int,
-    user_id: int,
-) -> Category:
-    category = session.get(Category, category_id)
-    if category is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Category not found",
-        )
-
-    is_owned = category.user_id == user_id
-    if not category.is_system and not is_owned:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Category not found",
-        )
-
-    return category
 
 
 @router.post(
@@ -136,58 +60,22 @@ def create_transaction(
             detail="Invalid user",
         )
 
-    if payload.receipt_upload_id is not None:
-        _ensure_receipt_owner(session, payload.receipt_upload_id, current_user.id)
-
-    resolved_category_id = payload.category_id
-    if resolved_category_id is not None:
-        _ensure_category_accessible(session, resolved_category_id, current_user.id)
-    else:
-        resolved_category_id = suggest_category_for_merchant(
-            session,
-            current_user.id,
-            payload.merchant_name,
-        )
-
-    transaction = Transaction(
+    transaction = create_transaction_for_user(
+        session,
         user_id=current_user.id,
-        category_id=resolved_category_id,
-        receipt_upload_id=payload.receipt_upload_id,
-        merchant_name=payload.merchant_name,
-        amount=payload.amount,
-        currency=payload.currency,
-        transaction_date=payload.transaction_date,
-        note=payload.note,
+        payload=payload,
+        skip_embedding=os.getenv("PFA_SKIP_EMBEDDING") == "1",
     )
-
-    # Phase 7 RAG: embed "merchant + note" for semantic_search_transactions.
-    # Fail-soft: nếu embedding fail (model không load được), vẫn tạo transaction.
-    search_text = _build_search_text(payload.merchant_name, payload.note)
-    import os
-    if search_text and os.getenv("PFA_SKIP_EMBEDDING") != "1":
-        try:
-            embedding_client = get_embedding_client()
-            transaction.search_embedding = embedding_client.embed_sync(search_text)
-        except Exception:  # noqa: BLE001
-            # Log và tiếp tục — search_embedding nullable, có thể backfill sau.
-            pass
-
-    session.add(transaction)
-    session.commit()
-    session.refresh(transaction)
-
-    if (
-        payload.merchant_name
-        and payload.category_id is not None
-    ):
-        remember_user_merchant_category(
-            session=session,
-            user_id=current_user.id,
-            merchant_name=payload.merchant_name,
-            category_id=payload.category_id,
-        )
-
-    return _to_response(transaction)
+    record_audit_event(
+        session,
+        user_id=current_user.id,
+        event="transaction.created",
+        target_type="transaction",
+        target_id=transaction.id,
+        metadata={"source": transaction.source},
+        commit=True,
+    )
+    return transaction
 
 
 @router.get("", response_model=TransactionListResponse)
@@ -207,61 +95,51 @@ def list_transactions(
             detail="Invalid user",
         )
 
-    if start_date is not None and end_date is not None and start_date > end_date:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="start_date must be on or before end_date",
-        )
-
-    base_query = select(Transaction).where(Transaction.user_id == current_user.id)
-    if start_date is not None:
-        base_query = base_query.where(Transaction.transaction_date >= start_date)
-    if end_date is not None:
-        base_query = base_query.where(Transaction.transaction_date <= end_date)
-    if category_id is not None:
-        base_query = base_query.where(Transaction.category_id == category_id)
-    if merchant:
-        like_pattern = f"%{merchant.strip()}%"
-        base_query = base_query.where(col(Transaction.merchant_name).ilike(like_pattern))
-
-    count_query = select(func.count()).select_from(base_query.subquery())
-    total = session.exec(count_query).one()
-
-    paged_query = (
-        base_query.order_by(
-            col(Transaction.transaction_date).desc(),
-            col(Transaction.id).desc(),
-        )
-        .offset((page - 1) * size)
-        .limit(size)
+    return list_transactions_for_user(
+        session,
+        user_id=current_user.id,
+        filters=TransactionListFilters(
+            start_date=start_date,
+            end_date=end_date,
+            category_id=category_id,
+            merchant=merchant,
+            page=page,
+            size=size,
+        ),
     )
-    rows = session.exec(paged_query).all()
 
-    # Enrich with category_name and has_invoice
-    enriched_items: list[TransactionResponse] = []
-    for tx in rows:
-        # Resolve category name
-        cat_name: str | None = None
-        if tx.category_id is not None:
-            cat = session.get(Category, tx.category_id)
-            if cat is not None:
-                cat_name = cat.name
 
-        # Check if invoice exists for this transaction's receipt
-        has_inv = False
-        if tx.receipt_upload_id is not None:
-            inv = session.exec(
-                select(Invoice).where(Invoice.receipt_upload_id == tx.receipt_upload_id),
-            ).first()
-            has_inv = inv is not None
-
-        enriched_items.append(
-            _to_response(tx, has_invoice=has_inv, category_name=cat_name)
+@router.get("/{transaction_id}", response_model=TransactionResponse)
+def get_transaction(
+    transaction_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> TransactionResponse:
+    if current_user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user",
         )
 
-    return TransactionListResponse(
-        items=enriched_items,
-        meta=TransactionListMeta(total=int(total), page=page, size=size),
+    return get_transaction_response_for_user(
+        session,
+        transaction_id=transaction_id,
+        user_id=current_user.id,
+    )
+
+
+@router.patch("/{transaction_id}", response_model=TransactionResponse)
+def patch_transaction(
+    transaction_id: int,
+    payload: TransactionUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> TransactionResponse:
+    return update_transaction(
+        transaction_id=transaction_id,
+        payload=payload,
+        session=session,
+        current_user=current_user,
     )
 
 
@@ -285,58 +163,23 @@ def update_transaction(
             detail="Invalid user",
         )
 
-    transaction = _ensure_transaction_owner(session, transaction_id, current_user.id)
-
-    update_data = payload.model_dump(exclude_unset=True)
-    if not update_data:
-        # Body rỗng -> không có gì để update; trả về state hiện tại để client biết
-        # request đã được xử lý nhưng không thay đổi.
-        return _to_response(transaction)
-
-    if "category_id" in update_data and update_data["category_id"] is not None:
-        _ensure_category_accessible(
-            session,
-            update_data["category_id"],
-            current_user.id,
-        )
-
-    for field, value in update_data.items():
-        setattr(transaction, field, value)
-
-    # Re-embed search_embedding khi merchant_name hoặc note đổi (Phase 7 RAG).
-    import os
-    skip_embedding = os.getenv("PFA_SKIP_EMBEDDING") == "1"
-    should_reembed = (
-        "merchant_name" in update_data or "note" in update_data
-    ) and not skip_embedding
-    if should_reembed:
-        search_text = _build_search_text(transaction.merchant_name, transaction.note)
-        if search_text:
-            try:
-                embedding_client = get_embedding_client()
-                transaction.search_embedding = embedding_client.embed_sync(search_text)
-            except Exception:  # noqa: BLE001
-                pass
-        else:
-            transaction.search_embedding = None
-
-    session.add(transaction)
-    session.commit()
-    session.refresh(transaction)
-
-    if (
-        transaction.merchant_name
-        and transaction.category_id is not None
-        and ("merchant_name" in update_data or "category_id" in update_data)
-    ):
-        remember_user_merchant_category(
-            session=session,
-            user_id=current_user.id,
-            merchant_name=transaction.merchant_name,
-            category_id=transaction.category_id,
-        )
-
-    return _to_response(transaction)
+    transaction = update_transaction_for_user(
+        session,
+        transaction_id=transaction_id,
+        user_id=current_user.id,
+        payload=payload,
+        skip_embedding=os.getenv("PFA_SKIP_EMBEDDING") == "1",
+    )
+    record_audit_event(
+        session,
+        user_id=current_user.id,
+        event="transaction.updated",
+        target_type="transaction",
+        target_id=transaction_id,
+        metadata={"fields": ",".join(sorted(payload.model_dump(exclude_unset=True).keys()))},
+        commit=True,
+    )
+    return transaction
 
 
 @router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -356,11 +199,36 @@ def delete_transaction(
             detail="Invalid user",
         )
 
-    transaction = _ensure_transaction_owner(session, transaction_id, current_user.id)
-    session.delete(transaction)
-    session.commit()
+    delete_transaction_for_user(session, transaction_id=transaction_id, user_id=current_user.id)
+    record_audit_event(
+        session,
+        user_id=current_user.id,
+        event="transaction.deleted",
+        target_type="transaction",
+        target_id=transaction_id,
+        commit=True,
+    )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{transaction_id}/receipt", response_model=ReceiptListItemResponse)
+def get_transaction_receipt(
+    transaction_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> ReceiptListItemResponse:
+    if current_user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user",
+        )
+
+    return transaction_receipt_response(
+        session,
+        transaction_id=transaction_id,
+        user_id=current_user.id,
+    )
 
 
 @router.get("/{transaction_id}/invoice", response_model=InvoiceResponse)
@@ -376,63 +244,8 @@ def get_transaction_invoice(
             detail="Invalid user",
         )
 
-    transaction = _ensure_transaction_owner(session, transaction_id, current_user.id)
-
-    if transaction.receipt_upload_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invoice not found",
-        )
-
-    invoice = session.exec(
-        select(Invoice).where(Invoice.receipt_upload_id == transaction.receipt_upload_id),
-    ).first()
-    if invoice is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invoice not found",
-        )
-
-    line_items = session.exec(
-        select(InvoiceLineItem)
-        .where(InvoiceLineItem.invoice_id == invoice.id)
-        .order_by(InvoiceLineItem.line_number),
-    ).all()
-
-    return InvoiceResponse(
-        id=invoice.id or 0,
-        receipt_upload_id=invoice.receipt_upload_id,
-        invoice_number=invoice.invoice_number,
-        template_symbol=invoice.template_symbol,
-        issue_date=invoice.issue_date,
-        tax_lookup_code=invoice.tax_lookup_code,
-        currency=invoice.currency,
-        seller_name=invoice.seller_name,
-        seller_tax_id=invoice.seller_tax_id,
-        seller_address=invoice.seller_address,
-        buyer_name=invoice.buyer_name,
-        buyer_tax_id=invoice.buyer_tax_id,
-        buyer_address=invoice.buyer_address,
-        payment_method=invoice.payment_method,
-        subtotal_before_tax=invoice.subtotal_before_tax,
-        total_tax=invoice.total_tax,
-        grand_total=invoice.grand_total,
-        amount_in_words=invoice.amount_in_words,
-        digital_signature=invoice.digital_signature,
-        signing_date=invoice.signing_date,
-        lookup_link=invoice.lookup_link,
-        line_items=[
-            InvoiceLineItemResponse(
-                id=item.id or 0,
-                line_number=item.line_number,
-                item_name=item.item_name,
-                unit=item.unit,
-                quantity=item.quantity,
-                unit_price=item.unit_price,
-                line_total=item.line_total,
-                vat_rate=item.vat_rate,
-                vat_amount=item.vat_amount,
-            )
-            for item in line_items
-        ],
+    return transaction_invoice_response(
+        session,
+        transaction_id=transaction_id,
+        user_id=current_user.id,
     )

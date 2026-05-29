@@ -11,10 +11,18 @@
 
 ## Setup lần đầu
 
+Tất cả cấu hình môi trường hiện nằm ở **root `.env`**. Khi clone mới, tạo file này từ template:
+
+```cmd
+copy .env.example .env
+```
+
+Sau đó chỉ sửa `D:\VuLapTrinh2\Personal_Finance_Analyzer\.env` cho toàn bộ stack: Docker, API, Worker và Frontend.
+
 ```cmd
 :: 1. Start Docker
 cd /d D:\VuLapTrinh2\Personal_Finance_Analyzer\infra\docker
-docker compose up -d
+docker compose --env-file ..\..\.env up -d
 
 :: 2. Tạo venv + cài packages
 cd /d D:\VuLapTrinh2\Personal_Finance_Analyzer\backend\api
@@ -38,7 +46,7 @@ Cần 4 terminal. Mỗi terminal mở CMD riêng, gõ lệnh tương ứng:
 **Terminal 1 — Docker** (chạy 1 lần, để yên):
 ```cmd
 cd /d D:\VuLapTrinh2\Personal_Finance_Analyzer\infra\docker
-docker compose up -d
+docker compose --env-file ..\..\.env up -d
 ```
 
 **Terminal 2 — Backend API** (bắt buộc):
@@ -80,8 +88,8 @@ corepack pnpm dev
 | Lỗi | Fix |
 |---|---|
 | API crash thiếu module | Chạy lại: `.\.venv\Scripts\python.exe -m pip install -e ..\shared -e .` |
-| CORS 400 Bad Request | Sửa `backend/api/.env`: `CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000` rồi restart API |
-| DB connection refused | Docker chưa up. Chạy `docker compose up -d` |
-| Port 5432 conflict | Project dùng port **5433**. Check `.env` có `localhost:5433` |
-| Worker không OCR | Check `backend/worker/.env` có `OCR_PROVIDER=llm_vision` |
-| Frontend "Failed to fetch" | Tạo file `frontend/web/.env.local` với nội dung: `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000` |
+| CORS 400 Bad Request | Sửa root `.env`: `CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000` rồi restart API |
+| DB connection refused | Docker chưa up. Chạy `docker compose --env-file ..\..\.env up -d` trong `infra\docker` |
+| Port 5432 conflict | Project dùng port **5433**. Check root `.env` có `localhost:5433` |
+| Worker không OCR | Check root `.env` có `OCR_PROVIDER=llm_vision` và `CHAT_LLM_*` |
+| Frontend "Failed to fetch" | Check root `.env` có `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000` |

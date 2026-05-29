@@ -8,12 +8,14 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from sqlmodel import Session, col, select
 
 from app.core.logging import get_logger
 from app.models.entities import ChatMessage
+from app.services.chat.intent_routing import build_intent_hint
 from app.services.chat.llm_client import LLMClientError, OpenAICompatClient
 from app.services.chat.safety import apply_safety_filter
 from app.services.chat.system_prompt import SYSTEM_PROMPT
@@ -36,15 +38,20 @@ class ChatStreamEvent:
 def _load_recent_history(
     session: Session,
     user_id: int,
+    conversation_id: int | None = None,
     limit: int = MAX_HISTORY_MESSAGES,
 ) -> list[ChatMessage]:
     """Load N messages gần nhất của user, ordered ASC (oldest first)."""
     statement = (
         select(ChatMessage)
         .where(ChatMessage.user_id == user_id)
-        .order_by(col(ChatMessage.created_at).desc(), col(ChatMessage.id).desc())
-        .limit(limit)
     )
+    if conversation_id is not None:
+        statement = statement.where(ChatMessage.conversation_id == conversation_id)
+    statement = statement.order_by(
+        col(ChatMessage.created_at).desc(),
+        col(ChatMessage.id).desc(),
+    ).limit(limit)
     rows = list(session.exec(statement).all())
     rows.reverse()  # Oldest first for conversation order
     return rows
@@ -77,6 +84,7 @@ def _persist_message(
     session: Session,
     user_id: int,
     role: str,
+    conversation_id: int | None = None,
     content: str | None = None,
     tool_calls_json: str | None = None,
     tool_call_id: str | None = None,
@@ -85,6 +93,7 @@ def _persist_message(
     """Persist a single chat message."""
     msg = ChatMessage(
         user_id=user_id,
+        conversation_id=conversation_id,
         role=role,
         content=content,
         tool_calls_json=tool_calls_json,
@@ -97,11 +106,31 @@ def _persist_message(
     return msg
 
 
+def _touch_conversation(
+    session: Session,
+    conversation_id: int | None,
+    title_hint: str | None = None,
+) -> None:
+    if conversation_id is None:
+        return
+    from app.models.entities import ChatConversation
+
+    conversation = session.get(ChatConversation, conversation_id)
+    if conversation is None:
+        return
+    if conversation.title is None and title_hint:
+        conversation.title = title_hint.strip()[:80] or None
+    conversation.updated_at = datetime.now(tz=UTC)
+    session.add(conversation)
+    session.commit()
+
+
 async def run_chat_turn(
     session: Session,
     llm: OpenAICompatClient,
     user_id: int,
     user_message: str,
+    conversation_id: int | None = None,
 ) -> AsyncIterator[ChatStreamEvent]:
     """Thực hiện 1 turn: user message → (tool calls)* → streamed response.
 
@@ -111,15 +140,25 @@ async def run_chat_turn(
     start = time.perf_counter()
 
     # 1. Load history
-    history = _load_recent_history(session, user_id)
+    history = _load_recent_history(session, user_id, conversation_id=conversation_id)
 
     # 2. Persist user message
-    _persist_message(session, user_id, "user", content=user_message)
+    _persist_message(
+        session,
+        user_id,
+        "user",
+        conversation_id=conversation_id,
+        content=user_message,
+    )
+    _touch_conversation(session, conversation_id, title_hint=user_message)
 
     # 3. Build messages array
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
     ]
+    intent_hint = build_intent_hint(user_message)
+    if intent_hint:
+        messages.append({"role": "system", "content": intent_hint})
     messages.extend(_history_to_openai_format(history))
     messages.append({"role": "user", "content": user_message})
 
@@ -134,6 +173,7 @@ async def run_chat_turn(
             logger.exception("chat.llm_error user_id=%d round=%d", user_id, round_num)
             _persist_message(
                 session, user_id, "assistant",
+                conversation_id=conversation_id,
                 content="Xin lỗi, hệ thống đang bận. Vui lòng thử lại sau.",
             )
             yield ChatStreamEvent("error", {"message": str(exc)})
@@ -152,6 +192,7 @@ async def run_chat_turn(
             # Persist assistant message with tool_calls
             _persist_message(
                 session, user_id, "assistant",
+                conversation_id=conversation_id,
                 tool_calls_json=json.dumps(tool_calls, ensure_ascii=False),
             )
 
@@ -173,6 +214,7 @@ async def run_chat_turn(
                 # Persist tool result
                 _persist_message(
                     session, user_id, "tool",
+                    conversation_id=conversation_id,
                     content=result_str,
                     tool_call_id=tc["id"],
                     tool_name=tool_name,
@@ -200,7 +242,14 @@ async def run_chat_turn(
             yield ChatStreamEvent("token", {"content": chunk})
 
         # Persist final assistant message
-        _persist_message(session, user_id, "assistant", content=content)
+        _persist_message(
+            session,
+            user_id,
+            "assistant",
+            conversation_id=conversation_id,
+            content=content,
+        )
+        _touch_conversation(session, conversation_id)
 
         elapsed_ms = (time.perf_counter() - start) * 1000
         logger.info(
@@ -215,6 +264,7 @@ async def run_chat_turn(
     # Hit max rounds
     _persist_message(
         session, user_id, "assistant",
+        conversation_id=conversation_id,
         content="Xin lỗi, câu hỏi quá phức tạp. Hãy thử câu ngắn hơn.",
     )
     yield ChatStreamEvent("error", {"message": "Max tool rounds exceeded"})

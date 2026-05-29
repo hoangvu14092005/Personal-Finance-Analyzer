@@ -20,7 +20,9 @@ from app.services.chat.queries import (
     get_recent_transactions,
     get_spending_by_day,
     get_top_merchants,
+    lookup_transaction_receipts,
     query_spending_summary,
+    search_receipts,
     search_transactions,
 )
 from app.services.chat.rag_queries import (
@@ -103,6 +105,91 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             "required": [],
         },
         handler=search_transactions,
+    ),
+    "search_receipts": ToolDefinition(
+        name="search_receipts",
+        description=(
+            "Search receipt/invoice evidence uploaded by the user. Use for questions"
+            " about receipts, invoices, documents, upload date, receipt date, OCR"
+            " status, or whether a receipt has become a transaction. Do not use this"
+            " tool to calculate official spending totals."
+        ),
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "receipt_date": {
+                    "type": "string",
+                    "description": "Date printed on the receipt/invoice in YYYY-MM-DD format",
+                },
+                "created_date": {
+                    "type": "string",
+                    "description": "Upload date in YYYY-MM-DD format",
+                },
+                "merchant": {
+                    "type": "string",
+                    "description": "Merchant/seller name to search (partial match)",
+                },
+                "status": {
+                    "type": "string",
+                    "description": (
+                        "Receipt pipeline status, e.g. uploaded, processing, ready, failed"
+                    ),
+                },
+                "ocr_status": {
+                    "type": "string",
+                    "description": "OCR status, e.g. pending, processing, ready, failed",
+                },
+                "has_transaction": {
+                    "type": "boolean",
+                    "description": "Filter receipts that have or do not have a linked transaction",
+                },
+                "has_invoice": {
+                    "type": "boolean",
+                    "description": "Filter structured e-invoices/VAT invoices",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 10, max 50)",
+                },
+            },
+            "required": [],
+        },
+        handler=search_receipts,
+    ),
+    "lookup_transaction_receipts": ToolDefinition(
+        name="lookup_transaction_receipts",
+        description=(
+            "Search transactions and report whether each transaction has linked receipt"
+            " evidence. Use when the user asks if a transaction has a receipt/invoice."
+        ),
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "merchant": {
+                    "type": "string",
+                    "description": "Merchant name to search (partial match)",
+                },
+                "transaction_date": {
+                    "type": "string",
+                    "description": "Exact transaction date in YYYY-MM-DD format",
+                },
+                "date_range": {
+                    "type": "string",
+                    "enum": ["7d", "30d", "this_month", "last_month"],
+                    "description": "Time period preset based on official transaction date",
+                },
+                "has_receipt": {
+                    "type": "boolean",
+                    "description": "Filter transactions with or without linked receipt evidence",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 10, max 50)",
+                },
+            },
+            "required": [],
+        },
+        handler=lookup_transaction_receipts,
     ),
     "get_budget_status": ToolDefinition(
         name="get_budget_status",

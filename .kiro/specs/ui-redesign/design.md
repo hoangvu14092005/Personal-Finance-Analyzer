@@ -8,7 +8,7 @@ Triển khai từ bottom-up: design tokens → primitive components → layout c
 ## Design Goals
 
 1. **Consistency**: mọi page dùng cùng tokens (color, typography, spacing, radius).
-2. **Brand identity**: cream canvas + yellow CTA + IBM Plex Sans là signature.
+2. **Brand identity**: white canvas + yellow CTA + IBM Plex Sans là signature.
 3. **Maintainability**: components primitives reusable, không viết lại CSS mỗi page.
 4. **Accessibility**: WCAG AA baseline.
 5. **Incremental migration**: không break existing functionality.
@@ -92,7 +92,7 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        canvas: "#eeefe9",
+        canvas: "#ffffff",
         "surface-soft": "#e5e7e0",
         "surface-card": "#ffffff",
         "surface-doc": "#fcfcfa",

@@ -1,9 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+import os
+from datetime import date
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pfa_shared.enums import ReceiptStatus
 from sqlmodel import Session, select
 
@@ -11,34 +13,49 @@ from app.core.config import get_settings
 from app.core.database import get_session
 from app.dependencies.auth import get_current_user
 from app.integrations.storage import get_storage_service
-from app.models.entities import Invoice, InvoiceLineItem, OcrResult, ReceiptLineItem, ReceiptUpload, User
+from app.models.entities import (
+    OcrResult,
+    ReceiptUpload,
+    User,
+)
 from app.schemas.receipts import (
     DraftReviewResponse,
-    InvoiceLineItemResponse,
     InvoiceResponse,
     LineItemResponse,
     OcrResultResponse,
+    ReceiptConfirmRequest,
+    ReceiptConfirmResponse,
+    ReceiptImageResponse,
+    ReceiptListResponse,
     ReceiptStatusResponse,
     ReceiptUploadResponse,
 )
-from app.services.draft_review import build_draft_review
+from app.schemas.transactions import TransactionResponse
+from app.services.audit import record_audit_event
 from app.services.ocr_queue import enqueue_ocr_job
 from app.services.receipt_validation import validate_upload_file
+from app.services.receipt_workflow import (
+    ReceiptListFilters,
+    build_receipt_draft_response,
+    confirm_receipt_as_transaction,
+    delete_receipt_for_user,
+    ensure_receipt_owner,
+    invoice_response_for_receipt,
+    list_receipts_for_user,
+    receipt_image_response,
+    receipt_line_items_response,
+    receipt_transaction_response,
+    reset_receipt_for_retry,
+    update_receipt_draft_metadata,
+)
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
 
-
-def _ensure_receipt_owner(
-    session: Session,
-    receipt_id: int,
-    user_id: int,
-) -> ReceiptUpload:
-    receipt = session.get(ReceiptUpload, receipt_id)
-    if receipt is None or receipt.user_id != user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receipt not found")
-    return receipt
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
 
 
+@router.post("", response_model=ReceiptUploadResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/upload", response_model=ReceiptUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_receipt(
     file: UploadFile = File(...),
@@ -70,6 +87,7 @@ async def upload_receipt(
         file_size_bytes=stored_object.size_bytes,
         storage_key=stored_object.storage_key,
         status=ReceiptStatus.PROCESSING.value,
+        ocr_status="pending",
     )
     session.add(receipt)
     session.commit()
@@ -93,7 +111,50 @@ async def upload_receipt(
         session.commit()
         session.refresh(receipt)
 
+    record_audit_event(
+        session,
+        user_id=current_user.id,
+        event="receipt.uploaded",
+        target_type="receipt",
+        target_id=receipt.id,
+        metadata={"status": receipt.status},
+        commit=True,
+    )
     return ReceiptUploadResponse(receipt_id=receipt.id, status=receipt.status)
+
+
+@router.get("", response_model=ReceiptListResponse)
+def list_receipts(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+    receipt_date: date | None = Query(default=None),
+    created_date: date | None = Query(default=None),
+    merchant: str | None = Query(default=None, max_length=255),
+    status_filter: str | None = Query(default=None, alias="status", max_length=50),
+    ocr_status: str | None = Query(default=None, max_length=50),
+    has_transaction: bool | None = Query(default=None),
+    has_invoice: bool | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+) -> ReceiptListResponse:
+    if current_user.id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+
+    return list_receipts_for_user(
+        session,
+        user_id=current_user.id,
+        filters=ReceiptListFilters(
+            receipt_date=receipt_date,
+            created_date=created_date,
+            merchant=merchant,
+            status_filter=status_filter,
+            ocr_status=ocr_status,
+            has_transaction=has_transaction,
+            has_invoice=has_invoice,
+            page=page,
+            size=size,
+        ),
+    )
 
 
 @router.get("/{receipt_id}", response_model=ReceiptStatusResponse)
@@ -105,7 +166,7 @@ def get_receipt_status(
     if current_user.id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
 
-    receipt = _ensure_receipt_owner(session, receipt_id, current_user.id)
+    receipt = ensure_receipt_owner(session, receipt_id, current_user.id)
     return ReceiptStatusResponse(
         receipt_id=receipt.id or receipt_id,
         file_name=receipt.file_name,
@@ -126,7 +187,7 @@ def get_receipt_ocr_result(
     if current_user.id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
 
-    _ensure_receipt_owner(session, receipt_id, current_user.id)
+    ensure_receipt_owner(session, receipt_id, current_user.id)
     ocr_result = session.exec(
         select(OcrResult).where(OcrResult.receipt_upload_id == receipt_id),
     ).first()
@@ -158,71 +219,158 @@ def get_receipt_draft(
     if current_user.id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
 
-    receipt = _ensure_receipt_owner(session, receipt_id, current_user.id)
-    ocr_result = session.exec(
-        select(OcrResult).where(OcrResult.receipt_upload_id == receipt_id),
-    ).first()
-    if ocr_result is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OCR result not ready")
+    return build_receipt_draft_response(session, receipt_id=receipt_id, user_id=current_user.id)
 
-    draft = build_draft_review(
-        session=session,
-        receipt=receipt,
-        ocr_result=ocr_result,
+
+@router.patch("/{receipt_id}/draft", response_model=DraftReviewResponse)
+def update_receipt_draft(
+    receipt_id: int,
+    payload: ReceiptConfirmRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> DraftReviewResponse:
+    """Persist lightweight review edits before confirm.
+
+    For now the persisted draft lives as receipt summary metadata. Line-item
+    edits can be added later without changing the confirm contract.
+    """
+    if current_user.id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+
+    draft = update_receipt_draft_metadata(
+        session,
+        receipt_id=receipt_id,
         user_id=current_user.id,
+        payload=payload,
     )
-
-    # Check if Invoice exists and prefer its data
-    invoice = session.exec(
-        select(Invoice).where(Invoice.receipt_upload_id == receipt_id),
-    ).first()
-
-    merchant_name = draft.merchant_name
-    amount = draft.amount
-    transaction_date = draft.transaction_date
-    currency = draft.currency
-
-    if invoice is not None:
-        if invoice.seller_name:
-            merchant_name = invoice.seller_name
-        if invoice.grand_total is not None:
-            amount = invoice.grand_total
-        if invoice.issue_date is not None:
-            transaction_date = invoice.issue_date
-        if invoice.currency:
-            currency = invoice.currency
-
-    # Load line items
-    line_items = session.exec(
-        select(ReceiptLineItem)
-        .where(ReceiptLineItem.receipt_upload_id == receipt_id)
-        .order_by(ReceiptLineItem.line_number),
-    ).all()
-
-    return DraftReviewResponse(
-        receipt_id=draft.receipt_id,
-        receipt_status=draft.receipt_status,
-        provider=draft.provider,
-        confidence=draft.confidence,
-        merchant_name=merchant_name,
-        transaction_date=transaction_date,
-        amount=amount,
-        currency=currency,
-        suggested_category_id=draft.suggested_category_id,
-        raw_text=draft.raw_text,
-        line_items=[
-            LineItemResponse(
-                id=item.id or 0,
-                line_number=item.line_number,
-                item_name=item.item_name,
-                quantity=item.quantity,
-                unit_price=item.unit_price,
-                total_price=item.total_price,
-                category_id=item.category_id,
-            )
-            for item in line_items
-        ],
+    record_audit_event(
+        session,
+        user_id=current_user.id,
+        event="receipt.draft_updated",
+        target_type="receipt",
+        target_id=receipt_id,
+        commit=True,
     )
+    return draft
+
+
+@router.post("/{receipt_id}/retry", response_model=ReceiptUploadResponse)
+async def retry_receipt_ocr(
+    receipt_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> ReceiptUploadResponse:
+    if current_user.id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+
+    receipt = reset_receipt_for_retry(session, receipt_id=receipt_id, user_id=current_user.id)
+    if receipt.id is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Missing id")
+    enqueued = await enqueue_ocr_job(receipt.id)
+    if not enqueued:
+        receipt.status = ReceiptStatus.UPLOADED.value
+        receipt.error_code = "queue_unavailable"
+        receipt.error_message = "OCR queue is not available. You can retry later."
+        session.add(receipt)
+        session.commit()
+        session.refresh(receipt)
+    record_audit_event(
+        session,
+        user_id=current_user.id,
+        event="receipt.retry_requested",
+        target_type="receipt",
+        target_id=receipt.id,
+        metadata={"enqueued": enqueued, "status": receipt.status},
+        commit=True,
+    )
+    return ReceiptUploadResponse(receipt_id=receipt.id, status=receipt.status)
+
+
+@router.delete("/{receipt_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_receipt(
+    receipt_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    if current_user.id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+
+    receipt = delete_receipt_for_user(session, receipt_id=receipt_id, user_id=current_user.id)
+    try:
+        get_storage_service().delete(receipt.storage_key)
+    except Exception:  # noqa: BLE001 - DB delete already succeeded; storage cleanup can be retried later.
+        pass
+    record_audit_event(
+        session,
+        user_id=current_user.id,
+        event="receipt.deleted",
+        target_type="receipt",
+        target_id=receipt_id,
+        commit=True,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{receipt_id}/confirm", response_model=ReceiptConfirmResponse)
+def confirm_receipt(
+    receipt_id: int,
+    payload: ReceiptConfirmRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> ReceiptConfirmResponse:
+    if current_user.id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+
+    response = confirm_receipt_as_transaction(
+        session,
+        receipt_id=receipt_id,
+        user_id=current_user.id,
+        payload=payload,
+        skip_embedding=os.getenv("PFA_SKIP_EMBEDDING") == "1",
+    )
+    record_audit_event(
+        session,
+        user_id=current_user.id,
+        event="receipt.confirmed",
+        target_type="receipt",
+        target_id=receipt_id,
+        metadata={"transaction_id": response.transaction_id},
+        commit=True,
+    )
+    return response
+
+
+@router.get("/{receipt_id}/image", response_model=ReceiptImageResponse)
+def get_receipt_image(
+    receipt_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> ReceiptImageResponse:
+    if current_user.id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+    return receipt_image_response(session, receipt_id=receipt_id, user_id=current_user.id)
+
+
+@router.get("/{receipt_id}/line-items", response_model=list[LineItemResponse])
+def get_receipt_line_items(
+    receipt_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> list[LineItemResponse]:
+    if current_user.id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+    return receipt_line_items_response(session, receipt_id=receipt_id, user_id=current_user.id)
+
+
+@router.get("/{receipt_id}/transaction", response_model=TransactionResponse)
+def get_receipt_transaction(
+    receipt_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> TransactionResponse:
+    if current_user.id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+    return receipt_transaction_response(session, receipt_id=receipt_id, user_id=current_user.id)
 
 
 @router.get("/{receipt_id}/invoice", response_model=InvoiceResponse)
@@ -234,55 +382,4 @@ def get_receipt_invoice(
     """Return full invoice data with nested line items."""
     if current_user.id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
-
-    _ensure_receipt_owner(session, receipt_id, current_user.id)
-
-    invoice = session.exec(
-        select(Invoice).where(Invoice.receipt_upload_id == receipt_id),
-    ).first()
-    if invoice is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
-
-    line_items = session.exec(
-        select(InvoiceLineItem)
-        .where(InvoiceLineItem.invoice_id == invoice.id)
-        .order_by(InvoiceLineItem.line_number),
-    ).all()
-
-    return InvoiceResponse(
-        id=invoice.id or 0,
-        receipt_upload_id=invoice.receipt_upload_id,
-        invoice_number=invoice.invoice_number,
-        template_symbol=invoice.template_symbol,
-        issue_date=invoice.issue_date,
-        tax_lookup_code=invoice.tax_lookup_code,
-        currency=invoice.currency,
-        seller_name=invoice.seller_name,
-        seller_tax_id=invoice.seller_tax_id,
-        seller_address=invoice.seller_address,
-        buyer_name=invoice.buyer_name,
-        buyer_tax_id=invoice.buyer_tax_id,
-        buyer_address=invoice.buyer_address,
-        payment_method=invoice.payment_method,
-        subtotal_before_tax=invoice.subtotal_before_tax,
-        total_tax=invoice.total_tax,
-        grand_total=invoice.grand_total,
-        amount_in_words=invoice.amount_in_words,
-        digital_signature=invoice.digital_signature,
-        signing_date=invoice.signing_date,
-        lookup_link=invoice.lookup_link,
-        line_items=[
-            InvoiceLineItemResponse(
-                id=item.id or 0,
-                line_number=item.line_number,
-                item_name=item.item_name,
-                unit=item.unit,
-                quantity=item.quantity,
-                unit_price=item.unit_price,
-                line_total=item.line_total,
-                vat_rate=item.vat_rate,
-                vat_amount=item.vat_amount,
-            )
-            for item in line_items
-        ],
-    )
+    return invoice_response_for_receipt(session, receipt_id=receipt_id, user_id=current_user.id)

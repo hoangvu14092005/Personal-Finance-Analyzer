@@ -31,6 +31,24 @@ def engine() -> Engine:
 
 
 @pytest.fixture(autouse=True)
+def _force_test_environment(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
+    """Keep API tests isolated from root .env runtime infrastructure.
+
+    The app's local root .env uses S3/MinIO and real OCR settings. Unit and
+    integration tests should use local filesystem storage unless a test opts in
+    to another backend explicitly.
+    """
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    monkeypatch.setenv("PFA_SKIP_EMBEDDING", "1")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_database(engine: Engine) -> Generator[None, None, None]:
     SQLModel.metadata.drop_all(engine)
     SQLModel.metadata.create_all(engine)

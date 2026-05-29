@@ -62,6 +62,9 @@ class TransactionResponse(BaseModel):
     amount: Decimal
     currency: str
     transaction_date: date
+    source: str
+    status: str
+    confirmed_at: datetime | None
     note: str | None
     created_at: datetime
 

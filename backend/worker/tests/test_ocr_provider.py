@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import pytest
+
 from ocr_provider import get_ocr_provider
 
 
-def test_mock_ocr_provider_extract_and_normalize() -> None:
+def test_mock_ocr_provider_extract_and_normalize(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OCR_PROVIDER", "mock")
+
     provider = get_ocr_provider()
 
     raw = provider.extract_text(b"fake-jpeg-bytes", source_hint="sample.jpg")
@@ -16,7 +20,11 @@ def test_mock_ocr_provider_extract_and_normalize() -> None:
     assert normalized.currency == "VND"
 
 
-def test_mock_ocr_provider_without_source_hint_uses_byte_count() -> None:
+def test_mock_ocr_provider_without_source_hint_uses_byte_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OCR_PROVIDER", "mock")
+
     provider = get_ocr_provider()
     raw = provider.extract_text(b"abcdef")
     assert "6 bytes" in raw.raw_text

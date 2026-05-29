@@ -15,7 +15,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from pfa_shared.entities import OcrResult, ReceiptUpload, User
+from pfa_shared.entities import OcrResult, ReceiptUpload, Transaction, User
 from pfa_shared.enums import ReceiptStatus
 from pfa_shared.storage.local import LocalStorageService
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -92,6 +92,15 @@ def test_happy_path_creates_ocr_result_and_marks_ready(
     assert ocr.provider == "mock"
     assert ocr.normalized_payload is not None
     assert "Mock Mart" in ocr.normalized_payload
+    assert receipt.ocr_status == "succeeded"
+    assert receipt.merchant_name == "Mock Mart"
+    assert receipt.receipt_date is not None
+    assert receipt.total_amount is not None
+
+    transactions = db_session.exec(
+        select(Transaction).where(Transaction.receipt_upload_id == receipt.id),
+    ).all()
+    assert transactions == []
 
 
 def test_rerun_is_idempotent_no_duplicate_ocr_results(

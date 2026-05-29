@@ -9,6 +9,7 @@ from app.core.security import clear_auth_cookie, create_access_token, set_auth_c
 from app.dependencies.auth import get_current_user
 from app.models.entities import User
 from app.schemas.auth import AuthResponse, LoginRequest, ProfileResponse, RegisterRequest
+from app.services.audit import record_audit_event
 from app.services.password_service import hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -72,6 +73,15 @@ def register(
                 detail="Invalid user profile",
             )
 
+        record_audit_event(
+            session,
+            user_id=user.id,
+            event="auth.register",
+            target_type="user",
+            target_id=user.id,
+            commit=True,
+        )
+
         logger.debug("Creating access token...")
         access_token = create_access_token(user_id=user.id, email=user.email)
         set_auth_cookie(response, access_token)
@@ -85,7 +95,7 @@ def register(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Registration failed: {str(e)}",
-        )
+        ) from e
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -106,6 +116,15 @@ def login(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Invalid user profile",
         )
+
+    record_audit_event(
+        session,
+        user_id=user.id,
+        event="auth.login",
+        target_type="user",
+        target_id=user.id,
+        commit=True,
+    )
 
     access_token = create_access_token(user_id=user.id, email=user.email)
     set_auth_cookie(response, access_token)

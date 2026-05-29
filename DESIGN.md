@@ -2,7 +2,7 @@
 version: alpha
 name: PostHog-design-analysis
 description: |
-  A playful developer-tools system rendered on a warm cream canvas with hand-drawn hedgehog mascots dotted across every page like marginalia in a sketchbook. The chrome reads like a friendly engineering blog: olive-gray ink (#4d4f46) for body, deep olive-charcoal (#23251d) for headlines, IBM Plex Sans Variable typography in tight 1.43-line-height paragraphs, and a single saturated yellow-orange CTA pill (#f7a501) carrying every primary action. The system actively rejects the genre's typical somber dark-tech aesthetic in favor of a creamy, textbook-illustration sensibility — bordered cards stack on the cream canvas with 4–6px radii, doc sidebars use rounded outline-icon mini-illustrations, and the home page leans on cartoon characters (hedgehogs in lab coats, hedgehogs at terminals, hedgehogs in lounge chairs) as its signature decoration. Code samples and product analytics charts live inside white-on-cream cards with thin olive borders; the contrast between the playful illustration and the data-dense product imagery is the brand's signature voice.
+  A playful developer-tools system rendered on a clean white canvas with hand-drawn hedgehog mascots dotted across every page like marginalia in a sketchbook. The chrome reads like a friendly engineering blog: olive-gray ink (#4d4f46) for body, deep olive-charcoal (#23251d) for headlines, IBM Plex Sans Variable typography in tight 1.43-line-height paragraphs, and a single saturated yellow-orange CTA pill (#f7a501) carrying every primary action. The system actively rejects the genre's typical somber dark-tech aesthetic in favor of a textbook-illustration sensibility — bordered cards stack on the white canvas with 4–6px radii, doc sidebars use rounded outline-icon mini-illustrations, and the home page leans on cartoon characters (hedgehogs in lab coats, hedgehogs at terminals, hedgehogs in lounge chairs) as its signature decoration. Code samples and product analytics charts live inside white-on-white cards with thin olive borders; the contrast between the playful illustration and the data-dense product imagery is the brand's signature voice.
 
 colors:
   primary: "#f7a501"
@@ -18,7 +18,7 @@ colors:
   hairline: "#bfc1b7"
   hairline-soft: "#dcdfd2"
   on-dark: "#ffffff"
-  canvas: "#eeefe9"
+  canvas: "#ffffff"
   surface-soft: "#e5e7e0"
   surface-card: "#ffffff"
   surface-doc: "#fcfcfa"
@@ -356,14 +356,14 @@ components:
 
 ## Overview
 
-PostHog's marketing system is built on the visual contradiction at the heart of the brand: a serious open-source product analytics platform rendered as if it were a friendly engineering sketchbook. The chrome runs on a warm cream canvas (`{colors.canvas}` — `#eeefe9`) — not white — and every page is dotted with hand-drawn hedgehog mascots in lab coats, lounge chairs, terminals, and reading glasses, scattered across the layout like marginalia in a textbook. Type sits in IBM Plex Sans Variable at olive-gray (`{colors.body}` — `#4d4f46`) for body and deep olive-charcoal (`{colors.ink}` — `#23251d`) for headlines, with weights stepped tightly between 400, 600, 700, and 800 to create hierarchy without color. The single saturated yellow-orange pill (`{colors.primary}` — `#f7a501`) is the brand's only loud chromatic moment; everything else is cream, olive, white card, and the occasional pastel callout band.
+PostHog's marketing system is built on the visual contradiction at the heart of the brand: a serious open-source product analytics platform rendered as if it were a friendly engineering sketchbook. The chrome runs on a clean white canvas (`{colors.canvas}` — `#ffffff`) and every page is dotted with hand-drawn hedgehog mascots in lab coats, lounge chairs, terminals, and reading glasses, scattered across the layout like marginalia in a textbook. Type sits in IBM Plex Sans Variable at olive-gray (`{colors.body}` — `#4d4f46`) for body and deep olive-charcoal (`{colors.ink}` — `#23251d`) for headlines, with weights stepped tightly between 400, 600, 700, and 800 to create hierarchy without color. The single saturated yellow-orange pill (`{colors.primary}` — `#f7a501`) is the brand's only loud chromatic moment; everything else is olive ink, white card, and the occasional pastel callout band.
 
-The system has a distinctive **two-mode body layout**: marketing pages (home, workflows, pricing) lean on alternating-pastel callout bands and feature tiles in white cards on cream, while documentation pages add a sticky 240px left sidebar with a rounded outline-icon section list. Code samples are full-width dark blocks on `{colors.surface-dark}` (the same olive-charcoal that carries body ink, used inverted) inside white doc cards, creating the system's most distinctive visual moment: a dark-on-dark code island floating inside a white card on a cream canvas, with a hedgehog mascot doodled in the margin.
+The system has a distinctive **two-mode body layout**: marketing pages (home, workflows, pricing) lean on alternating-pastel callout bands and feature tiles in white cards on the canvas, while documentation pages add a sticky 240px left sidebar with a rounded outline-icon section list. Code samples are full-width dark blocks on `{colors.surface-dark}` (the same olive-charcoal that carries body ink, used inverted) inside white doc cards, creating the system's most distinctive visual moment: a dark-on-dark code island floating inside a white card on a white canvas, with a hedgehog mascot doodled in the margin.
 
-Sections stack at `{spacing.section}` (80px) rhythm with cream canvas continuing edge-to-edge between them. The only color bands that interrupt the cream are pastel `{component.banner-tip-blue}` / `-green` / `-red` / `-purple` callout panels inside doc articles — soft tinted boxes that carry "💡 Tip", "✅ Success", "⚠️ Warning", "📘 Info" inline annotations. There are no decorative gradients, no atmospheric mesh backgrounds, and no full-bleed dark hero chapters; the cream canvas runs uninterrupted top to bottom and the hedgehogs are the entire visual identity.
+Sections stack at `{spacing.section}` (80px) rhythm with the white canvas continuing edge-to-edge between them. The only color bands that interrupt the white are pastel `{component.banner-tip-blue}` / `-green` / `-red` / `-purple` callout panels inside doc articles — soft tinted boxes that carry "💡 Tip", "✅ Success", "⚠️ Warning", "📘 Info" inline annotations. There are no decorative gradients, no atmospheric mesh backgrounds, and no full-bleed dark hero chapters; the white canvas runs uninterrupted top to bottom and the hedgehogs are the entire visual identity.
 
 **Key Characteristics:**
-- Warm cream canvas (`{colors.canvas}` — #eeefe9) end-to-end with no surface alternation between sections — the page is one continuous sheet
+- Clean white canvas (`{colors.canvas}` — #ffffff) end-to-end with no surface alternation between sections — the page is one continuous sheet
 - Single yellow-orange CTA pill (`{colors.primary}` — #f7a501) with deep olive text (`{colors.on-primary}`) — the brand's only saturated color
 - IBM Plex Sans Variable across every text role with weights 400/500/600/700/800 — no other typeface in the system
 - Hand-drawn hedgehog mascots scattered across the layout as the entire decorative system — no gradients, no mesh, no atmospheric backgrounds
@@ -381,9 +381,9 @@ Sections stack at `{spacing.section}` (80px) rhythm with cream canvas continuing
 - **Yellow Active** (`{colors.primary-active}` — `#b17816`): deeply-pressed yellow + the system's gold-toned border accent (rare 1px gold rule on inline form elements).
 
 ### Surface
-- **Canvas** (`{colors.canvas}` — `#eeefe9`): the warm cream page background. End-to-end on every page; the brand's most distinctive surface choice.
+- **Canvas** (`{colors.canvas}` — `#ffffff`): the white page background. End-to-end on every page; the dominant default surface.
 - **Soft Surface** (`{colors.surface-soft}` — `#e5e7e0`): button-secondary fill, sub-nav strip background, inline-code chip background.
-- **Surface Card** (`{colors.surface-card}` — `#ffffff`): true white card and tile background sitting on top of the cream canvas. The dominant card surface.
+- **Surface Card** (`{colors.surface-card}` — `#ffffff`): true white card and tile background sitting on top of the canvas. The dominant card surface.
 - **Surface Doc** (`{colors.surface-doc}` — `#fcfcfa`): a faintly cream-warm white used inside doc article body cards — slightly softer than pure white to keep the page tonally unified.
 - **Surface Dark** (`{colors.surface-dark}` — `#23251d`): the deep olive-charcoal used inverted as code-block background. The same hex as `{colors.ink}` — the brand uses one olive-near-black for both text and dark code surfaces.
 - **Hairline** (`{colors.hairline}` — `#bfc1b7`): 1px card border, table rule, footer column dividers.
@@ -391,7 +391,7 @@ Sections stack at `{spacing.section}` (80px) rhythm with cream canvas continuing
 - **On Dark** (`{colors.on-dark}` — `#ffffff`): primary text on `{colors.surface-dark}` code blocks.
 
 ### Text
-- **Ink** (`{colors.ink}` — `#23251d`): headlines, button text on light, primary nav links — deep olive-charcoal that reads near-black against cream.
+- **Ink** (`{colors.ink}` — `#23251d`): headlines, button text on light, primary nav links — deep olive-charcoal that reads near-black against the white canvas.
 - **Body** (`{colors.body}` — `#4d4f46`): default paragraph text, doc article body, inline link color before hover. The brand's most-used text color.
 - **Charcoal** (`{colors.charcoal}` — `#33342d`): emphasized body text where body is too soft.
 - **Mute** (`{colors.mute}` — `#6c6e63`): metadata, footer link text, in-list secondary annotations.
@@ -462,7 +462,7 @@ IBM Plex Sans Variable is open-source and Google-Fonts-hosted. There is no need 
 - **Footer:** 6-column horizontal link grid at desktop, 3-up at tablet, 2-up at mobile.
 
 ### Whitespace Philosophy
-Whitespace is generous on marketing pages and tight on doc pages. The home and workflows pages stack feature tiles with `{spacing.lg}` (16px) gutters and 24px internal padding, while doc articles tighten internal spacing to `{spacing.md}` (12px) between paragraphs to maximize information density. The cream canvas runs continuously through every section — there are no decorative dividers, no shaded section bands; only the 1px hairline beneath section eyebrows and footer column rules separate content blocks.
+Whitespace is generous on marketing pages and tight on doc pages. The home and workflows pages stack feature tiles with `{spacing.lg}` (16px) gutters and 24px internal padding, while doc articles tighten internal spacing to `{spacing.md}` (12px) between paragraphs to maximize information density. The white canvas runs continuously through every section — there are no decorative dividers, no shaded section bands; only the 1px hairline beneath section eyebrows and footer column rules separate content blocks.
 
 ## Elevation & Depth
 
@@ -473,7 +473,7 @@ Whitespace is generous on marketing pages and tight on doc pages. The home and w
 | 2 — Hairline soft | 1px solid `{colors.hairline-soft}` | In-card row divider between adjacent rows |
 | 3 — Inverted dark code block | `{colors.surface-dark}` fill | Code samples inside doc cards — the system's only "elevated" surface uses color, not shadow |
 
-The system has no drop-shadow elevation in marketing or product chrome. Cards sit flat on cream with thin olive borders. The single inverted moment is the dark code-block surface used inside doc article body cards.
+The system has no drop-shadow elevation in marketing or product chrome. Cards sit flat on white with thin olive borders. The single inverted moment is the dark code-block surface used inside doc article body cards.
 
 ### Decorative Depth
 Depth comes entirely from illustration and the pastel callout band system, not from CSS effects:
@@ -515,7 +515,7 @@ There is no photography. Visual elements are limited to:
 - Used for "Get started — free" (sticky top-nav CTA), "Sign up", "Try it free", "Subscribe" — every primary action.
 - Pressed state lives in `button-primary-pressed` — background drops to `{colors.primary-pressed}`.
 
-**`button-secondary`** — soft alternative on cream canvas
+**`button-secondary`** — soft alternative on white canvas
 - Background `{colors.surface-soft}` (`#e5e7e0`), text `{colors.ink}`, type `{typography.button-md}`, padding `8px 16px`, height `40px`, rounded `{rounded.md}`.
 - "Talk to sales", "Read docs", "Watch demo" — second-tier actions paired with the yellow primary.
 
@@ -530,7 +530,7 @@ There is no photography. Visual elements are limited to:
 
 **`product-tab`** + **`product-tab-active`** — major product section tabs
 - Default: transparent background, text `{colors.body}`, type `{typography.body-strong}`, padding `8px 12px`, rounded `{rounded.md}`.
-- Active: background flips to `{colors.surface-card}` (white), text `{colors.ink}` — the tab card lifts off the cream canvas as the visual signal of selection.
+- Active: background flips to `{colors.surface-card}` (white), text `{colors.ink}` — the tab card lifts off the canvas as the visual signal of selection.
 
 **`pill-tab`** + **`pill-tab-active`** — compact filter pill
 - Default: transparent background, text `{colors.body}`, type `{typography.button-sm}`, padding `6px 14px`, rounded `{rounded.full}`.
@@ -593,7 +593,7 @@ There is no photography. Visual elements are limited to:
 ### Navigation
 
 **`primary-nav`**
-- Background `{colors.canvas}` (cream — same as the page), text `{colors.ink}`, height `56px`, type `{typography.body-strong}`, rounded `{rounded.none}`.
+- Background `{colors.canvas}` (white — same as the page), text `{colors.ink}`, height `56px`, type `{typography.body-strong}`, rounded `{rounded.none}`.
 - Layout (desktop): PostHog wordmark + hedgehog logo at left, nav menu cluster ("Pricing · Docs · Community · Company"), right cluster with a search-glyph, "Login" link, and the always-yellow `{component.button-primary}` "Get started — free" pill anchored to the far right.
 
 **`sub-nav-strip`** — secondary nav bar (under primary)
@@ -622,19 +622,19 @@ There is no photography. Visual elements are limited to:
 ## Do's and Don'ts
 
 ### Do
-- Use `{colors.canvas}` (cream — `#eeefe9`) as the page body. Never substitute pure white as the canvas.
+- Use `{colors.canvas}` (white — `#ffffff`) as the page body.
 - Reserve `{colors.primary}` (yellow-orange) for the primary CTA pill only. The "Get started — free" treatment is the brand's anchor.
 - Render the brand wordmark with the hedgehog illustration alongside it, not as a stand-alone wordmark. The hedgehog IS the brand identity.
 - Use IBM Plex Sans Variable across every text role — body 400, emphasis 600/700, display 800.
-- Stack content sections at `{spacing.section}` (80px) rhythm with no decorative dividers between them; let the cream canvas continue uninterrupted.
+- Stack content sections at `{spacing.section}` (80px) rhythm with no decorative dividers between them; let the canvas continue uninterrupted.
 - Use `{component.banner-tip-blue}` / `-green` / `-red` / `-purple` only inside doc article body for tip/warning/note panels — keep marketing chrome out of the four-color callout family.
-- Pair every code sample with the dark `{component.code-block}` surface; inline `<code>` chips use `{component.inline-code}` (cream surface-soft chip).
+- Pair every code sample with the dark `{component.code-block}` surface; inline `<code>` chips use `{component.inline-code}` (soft surface chip).
 - Anchor a hedgehog mascot illustration in feature tile margins on home and workflows pages — the system's signature decoration.
 
 ### Don't
-- Don't introduce drop shadows on cards. Cards sit flat on cream with thin olive borders only.
+- Don't introduce drop shadows on cards. Cards sit flat on the canvas with thin olive borders only.
 - Don't add a second saturated chromatic CTA. Yellow-orange is the only loud color in the system.
-- Don't replace the cream canvas with pure white or full-bleed dark hero bands. The cream is the brand.
+- Don't introduce full-bleed dark hero bands or gradients/mesh backgrounds; keep the canvas flat and illustration-led.
 - Don't use the four-color callout banner pastels (`{colors.accent-blue-soft}`, `-green`, `-red`, `-purple`) as marketing-card backgrounds. They belong to inline doc content only.
 - Don't substitute the hedgehog illustration with a generic icon set. The character system is the brand.
 - Don't use uppercase transform outside of `{typography.heading-sm}`, `{typography.utility-xs}`, and `{typography.caption-xs}`. Uppercase is reserved for eyebrows and footer category headers.
@@ -678,7 +678,7 @@ The only "imagery" in the system is hand-drawn hedgehog illustrations rendered a
 4. Add new variants as separate component entries (`-pressed`, `-disabled`, `-focused`) — do not bury them inside prose.
 5. Default body to `{typography.body-md}` (16px / 400 / 1.5); reach for `{typography.body-strong}` for emphasis; reserve `{typography.display-lg}` (24px / 800) strictly for marketing display moments.
 6. Keep `{colors.primary}` scarce per viewport — at most one yellow-orange pill per fold.
-7. When introducing a new component, ask whether it can be expressed with the existing card + 6px-radius + cream-canvas vocabulary before adding new tokens. The system's strength is that it almost never needs new ones.
+7. When introducing a new component, ask whether it can be expressed with the existing card + 6px-radius + white-canvas vocabulary before adding new tokens. The system's strength is that it almost never needs new ones.
 
 ## Known Gaps
 

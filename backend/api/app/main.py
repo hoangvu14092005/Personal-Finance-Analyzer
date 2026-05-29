@@ -1,3 +1,4 @@
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -6,13 +7,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.health import router as health_router
+from app.api.v1.account import router as account_router
+from app.api.v1.analytics import router as analytics_router
+from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.billing import router as billing_router
 from app.api.v1.budgets import router as budgets_router
 from app.api.v1.categories import router as categories_router
 from app.api.v1.chat import router as chat_router
 from app.api.v1.dashboard import router as dashboard_router
+from app.api.v1.data import router as data_router
+from app.api.v1.insights import router as insights_router
+from app.api.v1.invoices import router as invoices_router
+from app.api.v1.merchants import router as merchants_router
 from app.api.v1.receipts import router as receipts_router
+from app.api.v1.security import router as security_router
+from app.api.v1.settings import router as settings_router
 from app.api.v1.transactions import router as transactions_router
+from app.api.v1.users import router as users_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.middleware.request_id import RequestIdMiddleware
@@ -43,7 +55,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 def _ensure_tables() -> None:
     """Create missing tables on startup. Safe to run multiple times."""
     from sqlalchemy import text
+
     from app.core.database import engine
+
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        logger.info("Skipping runtime table ensure during pytest")
+        return
 
     create_receipt_line_items_sql = """
     CREATE TABLE IF NOT EXISTS receipt_line_items (
@@ -57,7 +74,8 @@ def _ensure_tables() -> None:
         category_id INTEGER REFERENCES categories(id),
         created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
     );
-    CREATE INDEX IF NOT EXISTS ix_receipt_line_items_receipt ON receipt_line_items(receipt_upload_id);
+    CREATE INDEX IF NOT EXISTS ix_receipt_line_items_receipt
+        ON receipt_line_items(receipt_upload_id);
     CREATE INDEX IF NOT EXISTS ix_receipt_line_items_category ON receipt_line_items(category_id);
     """
 
@@ -152,13 +170,24 @@ app.add_middleware(
 )
 app.add_middleware(RequestIdMiddleware)
 app.include_router(health_router)
+app.include_router(account_router, prefix=settings.api_v1_prefix)
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
+app.include_router(audit_router, prefix=settings.api_v1_prefix)
+app.include_router(analytics_router, prefix=settings.api_v1_prefix)
 app.include_router(categories_router, prefix=settings.api_v1_prefix)
+app.include_router(billing_router, prefix=settings.api_v1_prefix)
+app.include_router(data_router, prefix=settings.api_v1_prefix)
 app.include_router(receipts_router, prefix=settings.api_v1_prefix)
 app.include_router(transactions_router, prefix=settings.api_v1_prefix)
 app.include_router(dashboard_router, prefix=settings.api_v1_prefix)
 app.include_router(budgets_router, prefix=settings.api_v1_prefix)
 app.include_router(chat_router, prefix=settings.api_v1_prefix)
+app.include_router(insights_router, prefix=settings.api_v1_prefix)
+app.include_router(invoices_router, prefix=settings.api_v1_prefix)
+app.include_router(merchants_router, prefix=settings.api_v1_prefix)
+app.include_router(security_router, prefix=settings.api_v1_prefix)
+app.include_router(settings_router, prefix=settings.api_v1_prefix)
+app.include_router(users_router, prefix=settings.api_v1_prefix)
 
 # Request → CORSMiddleware → RequestIdMiddleware → Endpoint
 # Response ← CORSMiddleware ← RequestIdMiddleware ← Endpoint

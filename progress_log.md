@@ -1402,7 +1402,7 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
       - Index async trong worker, không block upload flow
     - 9 tasks với tổng ước tính 6-7 ngày.
   - **Phase 8 — UI Redesign planning**:
-    - Đọc toàn bộ DESIGN.md (PostHog-style: cream canvas + yellow CTA + IBM Plex Sans + hairline cards + pastel callouts + hedgehog mascots).
+    - Đọc toàn bộ DESIGN.md (PostHog-style: white canvas + yellow CTA + IBM Plex Sans + hairline cards + pastel callouts + hedgehog mascots).
     - Phân tích sự khác biệt với UI hiện tại (slate palette, generic Tailwind defaults).
     - Lên chiến lược migration page-by-page, không big-bang rewrite.
     - Quyết định technical stack:
@@ -1652,7 +1652,7 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
 
 ### 2026-05-14 - phase-8 - UI Redesign per DESIGN.md (PostHog-inspired system)
 - Goal:
-  - Áp dụng design system `DESIGN.md` cho toàn bộ frontend: cream canvas, yellow CTA, IBM Plex Sans, hairline cards (không drop shadows), pastel callout banners.
+  - Áp dụng design system `DESIGN.md` cho toàn bộ frontend: white canvas, yellow CTA, IBM Plex Sans, hairline cards (không drop shadows), pastel callout banners.
 - Files changed:
   - **Foundation**:
     - frontend/web/app/globals.css (rewrite — design tokens qua `@theme inline`, IBM Plex Sans font stack, typography utility classes, responsive hero scale)
@@ -1681,7 +1681,7 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
     - app/receipts/[id]/review/page.tsx (low-confidence accent-red borders, code-block surface-dark cho raw OCR)
     - app/dashboard/dashboard-client.tsx (migrate script: slate-* → design tokens, rounded-2xl → rounded-md, bỏ shadow-sm)
 - What was implemented:
-  - **Design tokens qua Tailwind v4 CSS `@theme inline`**: canvas (#eeefe9), surface-soft/card/doc/dark, ink/body/charcoal/mute/ash/hairline palette, primary (#f7a501 yellow-orange) + pressed + active + on variants, accent-blue/green/red/purple + soft versions, link-blue/teal.
+  - **Design tokens qua Tailwind v4 CSS `@theme inline`**: canvas (#ffffff), surface-soft/card/doc/dark, ink/body/charcoal/mute/ash/hairline palette, primary (#f7a501 yellow-orange) + pressed + active + on variants, accent-blue/green/red/purple + soft versions, link-blue/teal.
   - **Typography scale**: display-xl (36/700), display-lg (24/800), heading-lg/md/sm/sm-mixed, body-md/strong/sm/xs, caption-md/sm/xs, utility-xs, button-md/sm. Responsive: hero scales 36px → 28px mobile.
   - **Flat cards với hairline borders**: không drop shadows theo DESIGN.md. 4 variants (product/feature/doc/pricing) khác padding.
   - **Yellow CTA**: duy nhất saturated color trong system. Dùng cho "Bắt đầu miễn phí", "Lưu giao dịch", "Gửi" chat, "Sinh insight".
@@ -1711,3 +1711,419 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - **Code block surface-dark**: raw OCR text trong review page dùng surface-dark (23251d) với text on-dark — matching DESIGN.md code-block spec.
   - **Tailwind v4**: dùng `@theme inline` trong globals.css thay vì `tailwind.config.ts` (không cần). Design tokens → CSS custom properties tự động expose thành `bg-canvas`, `text-ink`, v.v.
   - **E2E tests chưa update**: Playwright selectors có thể match label tiếng Việt khác (ví dụ cũ: "Dang nhap" no dấu → mới: "Đăng nhập" có dấu). Phase 9 hardening sẽ update nếu cần.
+
+### 2026-05-28 22:37 - api-redesign - Analytics namespace and RAG defer note
+- Goal:
+  - Lưu phần RAG hardening để làm sau và tiếp tục chuẩn hóa API backend theo contract `/analytics/*`.
+- Files changed:
+  - roadmap.md
+  - backend/api/app/services/analytics.py
+  - backend/api/app/schemas/analytics.py
+  - backend/api/app/api/v1/analytics.py
+  - backend/api/app/main.py
+  - backend/api/tests/test_analytics_api.py
+- What was implemented:
+  - Ghi rõ RAG hardening deferred trong roadmap: test RAG, receipt chưa confirm, structured evidence, hybrid search, date parser tiếng Việt, category filter cho semantic search.
+  - Thêm canonical router `/api/v1/analytics` song song với `/dashboard` cũ để không phá compatibility.
+  - Implement endpoint `/analytics/overview` dùng cùng source-of-truth `transactions` như dashboard summary.
+  - Implement `/analytics/categories`, `/analytics/merchants`, `/analytics/budgets` cho 8-screen API mapping.
+  - Thêm merchant/category aggregation service đọc từ `transactions`, không đọc OCR/receipt totals.
+  - Thêm schema response typed cho analytics categories, merchants, budgets.
+  - Thêm integration tests xác nhận analytics không tính receipt chưa confirm vào tổng tiền.
+- Validation:
+  - Backend ruff: `All checks passed!`
+  - `pytest tests/test_analytics_api.py -q`: 5 passed.
+  - Full backend API pytest: passed.
+  - `compileall app ../shared/pfa_shared`: passed.
+- Pending / Next:
+  - Tiếp tục API redesign với các namespace còn thiếu: settings, chat conversations, insights row-level, invoices direct lookup nếu cần.
+  - Có thể refactor dashboard `/summary` dùng lại `/analytics/overview` helper để giảm duplication sau khi API ổn định.
+- Risks / Notes:
+  - `/dashboard/summary` vẫn giữ nguyên để frontend hiện tại không bị gãy.
+  - `/analytics/*` hiện là bước đầu, chưa cover trends/calendar/anomalies trong API mapping v4.
+
+### 2026-05-29 00:01 - api-redesign - User settings API and entity
+- Goal:
+  - Tiếp tục API redesign bằng cách thêm entity/API settings theo contract 8 màn.
+- Files changed:
+  - backend/shared/pfa_shared/entities.py
+  - backend/api/app/models/entities.py
+  - backend/api/app/schemas/settings.py
+  - backend/api/app/services/settings.py
+  - backend/api/app/api/v1/settings.py
+  - backend/api/app/main.py
+  - backend/api/alembic/versions/a7b8c9d0e1f2_user_settings.py
+  - backend/api/tests/test_settings_api.py
+- What was implemented:
+  - Thêm entity `UserSettings` map bảng `user_settings`, user_id unique.
+  - Thêm settings groups: finance, AI, privacy.
+  - Finance settings gồm default_currency, timezone, locale, default_analytics_range, budget_month_start_day, number_format_locale, show_decimals.
+  - AI settings gồm allow_ai_data_processing, auto_generate_insights, assistant_use_history.
+  - Privacy settings gồm receipt_file_retention_days, raw_prompt_retention_days.
+  - Thêm `GET/PATCH /api/v1/settings/finance`, `/api/v1/settings/ai`, `/api/v1/settings/privacy`.
+  - `get_or_create_user_settings` tự seed settings từ `users` profile nếu chưa có row.
+  - PATCH finance sync ngược currency/timezone/locale vào `users` để code cũ vẫn đọc profile đúng.
+  - Thêm Alembic migration tạo `user_settings` và backfill từ `users`.
+- Validation:
+  - Backend ruff: passed.
+  - `pytest tests/test_settings_api.py -q`: 6 passed.
+  - Full backend API pytest: passed.
+  - API/shared compileall: passed.
+  - Worker pytest: 8 passed.
+  - Alembic compileall: passed.
+- Pending / Next:
+  - Có thể tiếp tục API redesign với `chat_conversations` hoặc `insights` row-level.
+  - Frontend Settings page/API client chưa nối vào endpoint mới.
+- Risks / Notes:
+  - `users` vẫn giữ currency/timezone/locale trong giai đoạn tương thích; source lâu dài nên là `user_settings`.
+  - Migration cần chạy trên Postgres dev/prod để tạo bảng thật ngoài test SQLite.
+
+### 2026-05-29 00:24 - api-redesign - Chat conversations backend
+- Goal:
+  - Thêm conversation/thread cho Financial Assistant để hỗ trợ drawer/history theo API mapping 8 màn.
+- Files changed:
+  - backend/shared/pfa_shared/entities.py
+  - backend/api/app/models/entities.py
+  - backend/api/app/schemas/chat.py
+  - backend/api/app/services/chat/conversations.py
+  - backend/api/app/services/chat/orchestrator.py
+  - backend/api/app/api/v1/chat.py
+  - backend/api/alembic/versions/b8c9d0e1f2a3_chat_conversations.py
+  - backend/api/tests/test_chat_conversations_api.py
+- What was implemented:
+  - Thêm entity `ChatConversation` với `user_id`, `title`, `archived_at`, `deleted_at`, `created_at`, `updated_at`.
+  - Thêm `chat_messages.conversation_id` nullable để tương thích dữ liệu cũ.
+  - Thêm Alembic migration tạo `chat_conversations`, thêm FK/index cho `chat_messages.conversation_id`, backfill message cũ vào conversation "Lịch sử chat" theo user.
+  - Thêm service layer cho create/list/get/default/delete conversation và ownership guard.
+  - Update orchestrator để load/persist history theo `conversation_id` khi có, đồng thời vẫn hỗ trợ mode cũ không có conversation.
+  - Thêm API:
+    - `GET /api/v1/chat/conversations`
+    - `POST /api/v1/chat/conversations`
+    - `GET /api/v1/chat/conversations/{conversation_id}/messages`
+    - `POST /api/v1/chat/conversations/{conversation_id}/messages`
+    - `DELETE /api/v1/chat/conversations/{conversation_id}`
+  - Giữ compatibility cho `POST /api/v1/chat/message`, `GET /api/v1/chat/history`, `DELETE /api/v1/chat/history`.
+  - Legacy history ẩn messages thuộc conversation đã soft-delete.
+- Validation:
+  - Backend ruff: passed.
+  - `pytest tests/test_chat_conversations_api.py -q`: 9 passed.
+  - Full backend API pytest: passed.
+  - API/shared/alembic compileall: passed.
+  - Worker pytest: 8 passed.
+- Pending / Next:
+  - Frontend chat drawer chưa nối API conversations.
+  - Có thể tiếp tục API redesign với `insights` row-level hoặc invoice direct lookup.
+  - Cân nhắc thêm route đổi tên/archive conversation nếu UI cần.
+- Risks / Notes:
+  - `conversation_id` nullable để không phá dữ liệu cũ; sau backfill production ổn định có thể siết NOT NULL sau.
+  - Delete conversation đang soft-delete conversation và ẩn khỏi legacy history, không hard-delete messages để giữ audit.
+
+### 2026-05-29 00:45 - api-redesign - Row-level Insights API
+- Goal:
+  - Tiếp tục API redesign bằng cách chuyển Insights từ snapshot/narrative sang row-level feed có thể list/detail/dismiss/feedback/generate.
+- Files changed:
+  - backend/shared/pfa_shared/entities.py
+  - backend/api/app/models/entities.py
+  - backend/api/app/models/__init__.py
+  - backend/api/app/schemas/insights.py
+  - backend/api/app/services/insights.py
+  - backend/api/app/api/v1/insights.py
+  - backend/api/app/main.py
+  - backend/api/alembic/versions/c9d0e1f2a3b4_row_level_insights.py
+  - backend/api/tests/test_insights_api.py
+- What was implemented:
+  - Thêm entity `Insight` và `InsightFeedback` để lưu từng insight độc lập theo user.
+  - Thêm migration tạo bảng `insights`, `insight_feedback` và index theo user/type/severity/status/range.
+  - Thêm service generate rule-based insights từ SQL aggregates: insufficient_data, top_category, period_change, budget_exceeded.
+  - Đảm bảo evidence của insight đọc từ `transactions`/`budgets`, không lấy receipt OCR totals làm nguồn tiền chính thức.
+  - Thêm API:
+    - `GET /api/v1/insights`
+    - `POST /api/v1/insights/generate`
+    - `GET /api/v1/insights/{insight_id}`
+    - `PATCH /api/v1/insights/{insight_id}`
+    - `POST /api/v1/insights/{insight_id}/feedback`
+  - Đặt route `/insights/generate` trước `/{insight_id}` để tránh route động bắt nhầm.
+- Validation:
+  - Backend ruff: passed.
+  - `pytest tests/test_insights_api.py -q`: 7 passed.
+  - Full backend API pytest: passed.
+  - API/shared/alembic compileall: passed.
+  - Worker pytest: 8 passed.
+- Pending / Next:
+  - Frontend Insights page chưa nối API row-level mới.
+  - Có thể tiếp tục API redesign với invoice direct lookup hoặc frontend API client mapping theo 8 màn.
+  - RAG hardening vẫn đang để sau theo quyết định trước đó.
+- Risks / Notes:
+  - `InsightSnapshot` vẫn giữ lại để tương thích logic cũ; row-level `Insight` là API feed mới.
+  - Rule-based generator là MVP deterministic; sau này có thể thêm provider AI nhưng vẫn phải ghi evidence từ SQL source-of-truth.
+
+### 2026-05-29 01:58 - api-redesign - Direct invoice retrieval API
+- Goal:
+  - Hoàn thiện Receipt Retrieval Layer bằng namespace `/invoices` theo API mapping 8 màn.
+- Files changed:
+  - backend/api/app/api/v1/invoices.py
+  - backend/api/app/services/invoices.py
+  - backend/api/app/main.py
+  - backend/api/tests/test_invoices_api.py
+- What was implemented:
+  - Thêm `GET /api/v1/invoices/{invoice_id}` trả full e-invoice detail kèm nested line items.
+  - Thêm `GET /api/v1/invoices/{invoice_id}/line-items` để UI có thể lazy-load bảng dòng hàng.
+  - Thêm service `ensure_invoice_owner` enforce invoice và receipt cùng thuộc `current_user`.
+  - Giữ đúng source-of-truth: invoice endpoints chỉ phục vụ chứng từ/evidence, không tính financial totals.
+  - Giữ tương thích với các link API đã có: `/receipts/{receipt_id}/invoice` và `/transactions/{transaction_id}/invoice`.
+- Validation:
+  - Backend ruff: passed.
+  - `pytest tests/test_invoices_api.py -q`: 4 passed.
+  - Full backend API pytest: passed.
+  - API/shared/alembic compileall: passed.
+  - Worker pytest: 8 passed.
+- Pending / Next:
+  - Có thể tiếp tục với `/analytics/insight-feed` compatibility endpoint hoặc frontend API client integration theo 8 màn.
+  - Chưa thêm CRUD invoice thủ công; hiện đây là retrieval layer cho dữ liệu sinh từ OCR/e-invoice parser.
+- Risks / Notes:
+  - Không cần migration mới vì bảng `invoices` và `invoice_line_items` đã tồn tại.
+  - Response schema đang reuse `InvoiceResponse` trong receipts schema; sau này có thể tách sang `schemas/invoices.py` nếu namespace invoice mở rộng.
+
+### 2026-05-29 02:32 - api-redesign - Full API gap pass 1
+- Goal:
+  - Bắt đầu hoàn thiện full API theo `pfa-api-mapping-8-screens-v4.md`, ưu tiên các endpoint UI 8 màn cần ngay và không cần đổi DB schema.
+- Files changed:
+  - backend/api/app/api/v1/analytics.py
+  - backend/api/app/api/v1/merchants.py
+  - backend/api/app/api/v1/receipts.py
+  - backend/api/app/api/v1/transactions.py
+  - backend/api/app/api/v1/users.py
+  - backend/api/app/main.py
+  - backend/api/app/schemas/analytics.py
+  - backend/api/app/schemas/merchants.py
+  - backend/api/app/schemas/users.py
+  - backend/api/app/services/analytics.py
+  - backend/api/app/services/date_ranges.py
+  - backend/api/app/services/merchants.py
+  - backend/api/app/services/receipt_workflow.py
+  - backend/api/app/services/transaction_workflow.py
+  - backend/api/tests/test_analytics_api.py
+  - backend/api/tests/test_merchants_api.py
+  - backend/api/tests/test_receipts_api.py
+  - backend/api/tests/test_transactions_update_delete.py
+  - backend/api/tests/test_users_api.py
+- What was implemented:
+  - Thêm analytics endpoints:
+    - `GET /api/v1/analytics/trends`
+    - `GET /api/v1/analytics/calendar`
+    - `GET /api/v1/analytics/anomalies`
+    - `GET /api/v1/analytics/insight-feed`
+  - Mở rộng range preset cho `90d`, `3m`, `6m`, `12m` để bám API mapping shared query standard.
+  - Trend/calendar/anomaly đều đọc từ `transactions`, không đọc OCR/receipt totals.
+  - `analytics/insight-feed` đọc row-level insights active theo range, nếu chưa có thì auto-generate deterministic insights từ transaction/budget evidence.
+  - Thêm `GET /api/v1/merchants/search` trả user alias trước, global merchant sau; không leak alias/category của user khác.
+  - Thêm `GET/PATCH /api/v1/users/me` cho Settings/Profile card, đồng bộ currency/timezone/locale sang `user_settings`.
+  - Thêm `GET /api/v1/transactions/{transaction_id}` và `PATCH /api/v1/transactions/{transaction_id}` alias cho contract transaction CRUD.
+  - Thêm `POST /api/v1/receipts/{receipt_id}/retry` reset OCR state và enqueue lại.
+  - Thêm `DELETE /api/v1/receipts/{receipt_id}` cho receipt chưa linked transaction; receipt đã có transaction trả 409 để bảo toàn evidence.
+- Validation:
+  - Backend ruff: passed.
+  - `pytest tests/test_analytics_api.py -q`: 9 passed.
+  - `pytest tests/test_merchants_api.py -q`: 3 passed.
+  - `pytest tests/test_users_api.py -q`: 3 passed.
+  - `pytest tests/test_transactions_update_delete.py -q`: 17 passed.
+  - `pytest tests/test_receipts_api.py -q`: 7 passed.
+  - Full backend API pytest: passed.
+  - API/shared/alembic compileall: passed.
+  - Worker pytest: 8 passed.
+- Pending / Next:
+  - Tiếp tục full API gap pass 2: notification settings, security sessions/login-history, data export/delete, account delete request, billing placeholders hoặc frontend API client integration.
+  - Có thể chuẩn hóa response envelope sau khi UI client đã nối endpoint thật; hiện vẫn giữ response shape cũ để không phá frontend/tests.
+- Risks / Notes:
+  - Receipt delete hiện là hard-delete DB row + best-effort storage cleanup, chỉ cho receipt chưa có transaction.
+  - Anomaly detection là rule-based MVP; đủ cho UI card, chưa phải ML/seasonality.
+  - `analytics/insight-feed` có `auto_generate=true` mặc định để Overview/Insights screen có dữ liệu ngay cả khi chưa có scheduler.
+
+### 2026-05-29 02:58 - api-redesign - Full API gap pass 2
+- Goal:
+  - Tiếp tục hoàn thiện API theo contract Settings/Security/Data/Billing trong `pfa-api-mapping-8-screens-v4.md`.
+- Files changed:
+  - backend/shared/pfa_shared/entities.py
+  - backend/api/app/api/v1/billing.py
+  - backend/api/app/api/v1/data.py
+  - backend/api/app/api/v1/security.py
+  - backend/api/app/api/v1/settings.py
+  - backend/api/app/main.py
+  - backend/api/app/schemas/billing.py
+  - backend/api/app/schemas/data_exports.py
+  - backend/api/app/schemas/security.py
+  - backend/api/app/schemas/settings.py
+  - backend/api/app/services/data_exports.py
+  - backend/api/app/services/settings.py
+  - backend/api/alembic/versions/d0e1f2a3b4c5_notification_settings.py
+  - backend/api/tests/test_billing_api.py
+  - backend/api/tests/test_data_api.py
+  - backend/api/tests/test_security_api.py
+  - backend/api/tests/test_settings_api.py
+- What was implemented:
+  - Thêm notification settings persistent vào `user_settings`:
+    - `email_notifications_enabled`
+    - `push_notifications_enabled`
+    - `budget_alerts_enabled`
+    - `receipt_notifications_enabled`
+    - `insight_notifications_enabled`
+  - Thêm `GET/PATCH /api/v1/settings/notifications`.
+  - Thêm Alembic migration bổ sung các notification fields vào `user_settings`.
+  - Thêm security/session endpoints:
+    - `GET /api/v1/security/sessions`
+    - `DELETE /api/v1/security/sessions/{session_id}`
+    - `DELETE /api/v1/security/sessions`
+    - `GET /api/v1/security/login-history`
+  - Security MVP phản ánh auth hiện tại là stateless JWT cookie; chưa có server-side session/audit table.
+  - Thêm billing read endpoints:
+    - `GET /api/v1/billing/plan`
+    - `GET /api/v1/billing/usage`
+    - `GET /api/v1/billing/history`
+  - Billing usage count đọc theo `current_user`: transactions, receipts, invoices, insights.
+  - Thêm data export MVP:
+    - `POST /api/v1/data/export`
+    - `GET /api/v1/data/export/{export_id}`
+    - `DELETE /api/v1/data/receipt-files` guarded 409 vì bulk deletion cần retention job thật.
+- Validation:
+  - Backend ruff: passed.
+  - `pytest tests/test_settings_api.py tests/test_security_api.py tests/test_billing_api.py tests/test_data_api.py -q`: 21 passed.
+  - Full backend API pytest: passed.
+  - API/shared/alembic compileall: passed.
+  - Worker pytest: 8 passed.
+- Pending / Next:
+  - Account delete request/cancel và audit-log vẫn chưa có bảng persistent.
+  - Billing checkout-session chưa thêm vì chưa có provider/payment config.
+  - Data export hiện là in-memory contract MVP, chưa sinh file download thật.
+  - Security sessions/login-history cần bảng server-side nếu muốn revoke token thật hoặc audit login thật.
+- Risks / Notes:
+  - `DELETE /data/receipt-files` cố tình guard 409 để tránh xóa mất chứng từ khi chưa có retention policy/job rõ ràng.
+  - Security delete session clear cookie qua response; JWT cũ vẫn hợp lệ đến expiry vì chưa có token denylist/session table.
+
+### 2026-05-29 03:24 - api-redesign - Full API gap pass 3
+- Goal:
+  - Hoàn thiện tiếp các API còn thiếu quanh account, audit placeholder, billing checkout và avatar theo contract Settings/API mapping.
+- Files changed:
+  - backend/shared/pfa_shared/entities.py
+  - backend/api/alembic/versions/e1f2a3b4c5d6_account_delete_fields.py
+  - backend/api/app/api/v1/account.py
+  - backend/api/app/api/v1/audit.py
+  - backend/api/app/api/v1/billing.py
+  - backend/api/app/api/v1/users.py
+  - backend/api/app/main.py
+  - backend/api/app/schemas/account.py
+  - backend/api/app/schemas/audit.py
+  - backend/api/app/schemas/billing.py
+  - backend/api/tests/test_account_api.py
+  - backend/api/tests/test_audit_api.py
+  - backend/api/tests/test_billing_api.py
+  - backend/api/tests/test_users_api.py
+- What was implemented:
+  - Thêm persistent account deletion fields trên `users` và migration tương ứng.
+  - Thêm `POST /api/v1/account/delete-request` và `/cancel` với grace period 14 ngày.
+  - Thêm `GET /api/v1/audit-log` contract MVP, hiện trả empty list khi chưa có audit table.
+  - Thêm `POST /api/v1/billing/checkout-session`, trả trạng thái `not_configured` khi chưa có billing provider.
+  - Thêm avatar endpoints `POST/DELETE /api/v1/users/me/avatar`, guarded 409 vì chưa có profile media storage metadata.
+- Validation:
+  - Backend ruff: passed.
+  - `pytest tests/test_account_api.py tests/test_audit_api.py tests/test_billing_api.py tests/test_users_api.py -q`: 14 passed.
+  - Full backend API pytest: passed.
+  - API/shared/alembic compileall: passed.
+  - Worker pytest: 8 passed.
+- Pending / Next:
+  - Nâng `/audit-log` từ placeholder thành audit table thật và ghi event cho account/settings/security/data actions.
+  - Server-side sessions/token denylist, data export file generation, billing provider, avatar storage metadata vẫn là integration work sau.
+- Risks / Notes:
+  - Account delete hiện chỉ là request/cancel metadata, chưa thực hiện purge hoặc anonymization job.
+  - Billing/avatar vẫn chủ động guard để UI có contract rõ nhưng không giả lập thành công khi hạ tầng chưa sẵn sàng.
+
+### 2026-05-29 10:18 - api-redesign - Persistent audit log pass
+- Goal:
+  - Nâng `/audit-log` từ placeholder thành audit trail persistent và nối các API quan trọng vào lịch sử hành động user.
+- Files changed:
+  - backend/shared/pfa_shared/entities.py
+  - backend/api/alembic/versions/f2a3b4c5d6e7_audit_logs.py
+  - backend/api/app/models/entities.py
+  - backend/api/app/services/audit.py
+  - backend/api/app/api/v1/audit.py
+  - backend/api/app/api/v1/account.py
+  - backend/api/app/api/v1/auth.py
+  - backend/api/app/api/v1/data.py
+  - backend/api/app/api/v1/security.py
+  - backend/api/app/api/v1/settings.py
+  - backend/api/tests/test_audit_api.py
+  - backend/api/tests/test_security_api.py
+- What was implemented:
+  - Thêm entity/migration `audit_logs` với ownership theo `user_id`, actor, event, target và metadata JSON text.
+  - Thêm service `record_audit_event`, `list_audit_events`, `parse_metadata`.
+  - `GET /api/v1/audit-log` đọc audit events thật, có `limit` 1..100.
+  - Ghi audit cho auth register/login, settings patch, account delete/cancel, data export request và security session revoke.
+  - `GET /api/v1/security/login-history` đọc từ audit events `auth.login`/`auth.register` thay vì placeholder cứng.
+- Validation:
+  - Backend ruff: passed.
+  - Targeted tests `test_audit_api.py test_security_api.py`: 9 passed.
+  - Full backend API pytest: passed.
+  - API/shared/alembic compileall: passed.
+  - Worker pytest: 8 passed.
+- Pending / Next:
+  - Server-side session table/token denylist vẫn cần nếu muốn revoke JWT thật trước expiry.
+  - Có thể mở rộng audit cho receipt confirm/retry/delete, transaction CRUD và billing khi provider thật được nối.
+- Risks / Notes:
+  - Audit metadata đang normalize về string để giữ schema response đơn giản cho UI.
+
+### 2026-05-29 10:29 - api-redesign - Source-of-truth audit coverage
+- Goal:
+  - Mở rộng audit trail sang các thao tác ảnh hưởng source-of-truth tài chính/chứng từ.
+- Files changed:
+  - backend/api/app/api/v1/transactions.py
+  - backend/api/app/api/v1/receipts.py
+- What was implemented:
+  - Ghi audit cho transaction create/update/delete với target `transaction` và metadata source/updated fields.
+  - Ghi audit cho receipt upload, draft update, retry OCR, delete và confirm-to-transaction.
+  - Receipt confirm audit lưu `transaction_id` để truy ngược luồng Receipt -> Transaction.
+- Validation:
+  - Backend ruff: passed.
+  - Targeted tests `test_transactions_api.py test_transactions_update_delete.py test_receipts_api.py test_receipts_draft.py test_audit_api.py`: 52 passed.
+  - Full backend API pytest: passed.
+  - API/shared/alembic compileall: passed.
+  - Worker pytest: 8 passed.
+- Pending / Next:
+  - Frontend API client integration cho 8 màn hình là bước có giá trị tiếp theo.
+  - Có thể thêm audit filters theo event/target nếu UI audit log cần search/filter nâng cao.
+- Risks / Notes:
+  - Transaction delete vẫn là hard delete như logic hiện tại; audit chỉ giữ event metadata, không snapshot toàn bộ transaction.
+
+### 2026-05-29 10:48 - frontend-api-integration - API client and 8-screen route start
+- Goal:
+  - Bắt đầu nối frontend Next.js với API backend thật, dùng `finance-analyzer-ui` làm tham chiếu UX nhưng triển khai lại trong `frontend/web`.
+- Files changed:
+  - frontend/web/lib/api-client.ts
+  - frontend/web/lib/analytics-api.ts
+  - frontend/web/lib/insights-api.ts
+  - frontend/web/lib/settings-api.ts
+  - frontend/web/lib/account-api.ts
+  - frontend/web/lib/dashboard-api.ts
+  - frontend/web/app/analytics/page.tsx
+  - frontend/web/app/analytics/analytics-client.tsx
+  - frontend/web/app/insights/page.tsx
+  - frontend/web/app/insights/insights-client.tsx
+  - frontend/web/app/settings/page.tsx
+  - frontend/web/app/settings/settings-client.tsx
+  - frontend/web/components/layout/Nav.tsx
+- What was implemented:
+  - Thêm shared `apiRequest` + query builder cho frontend API clients.
+  - Thêm Analytics client gọi `/analytics/categories`, `/trends`, `/merchants`, `/anomalies`, `/insight-feed`.
+  - Chuyển dashboard summary client sang endpoint canonical `/api/v1/analytics/overview` thay vì `/dashboard/summary`.
+  - Thêm Insights screen gọi `/insights`, `/insights/generate`, dismiss và feedback APIs.
+  - Thêm Settings screen gọi `/users/me`, `/settings/*`, `/security/*`, `/billing/*`, `/data/export`, `/audit-log`.
+  - Cập nhật navigation theo 8-screen flow: Overview, Analytics, Receipts, Transactions, Budgets, Insights, Assistant, Settings.
+- Validation:
+  - `corepack pnpm build`: passed.
+  - Dev server started on `http://127.0.0.1:3001` because port 3000 was already in use.
+  - Smoke HTTP checks: `/analytics`, `/insights`, `/settings`, `/dashboard` all returned 200.
+- Pending / Next:
+  - Nâng UI từng màn hiện có theo layout mới của `finance-analyzer-ui`, ưu tiên Dashboard/Transactions/Receipts/Budgets.
+  - Thêm frontend client cho direct invoices/merchant search nếu UI cần surfaced controls.
+  - Bổ sung Playwright tests cho Analytics, Insights và Settings routes.
+- Risks / Notes:
+  - Settings/Data/Billing vẫn phản ánh backend MVP: checkout/avatar/data export chưa phải provider/file pipeline thật.
+  - `/analytics` và `/insights` yêu cầu session; khi chưa login sẽ redirect client-side về login.

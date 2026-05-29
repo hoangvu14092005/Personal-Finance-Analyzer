@@ -12,7 +12,9 @@ session — engine từ caller (FastAPI dependency).
 """
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy.engine import Row
@@ -50,6 +52,48 @@ class RecentTransactionItem:
     transaction_date: str  # ISO format YYYY-MM-DD
     category_id: int | None
     category_name: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class MerchantBreakdown:
+    """Một dòng merchant aggregation."""
+
+    merchant_name: str
+    total_amount: Decimal
+    transaction_count: int
+    percentage: float
+
+
+@dataclass(frozen=True, slots=True)
+class TrendPoint:
+    period_start: date
+    period_end: date
+    amount: Decimal
+    transaction_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class CalendarDay:
+    date: date
+    amount: Decimal
+    transaction_count: int
+    intensity: int
+    top_category_name: str | None
+    is_unusual: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SpendingAnomaly:
+    id: str
+    type: str
+    severity: str
+    title: str
+    transaction_id: int
+    merchant_name: str | None
+    transaction_date: date
+    amount: Decimal
+    baseline_amount: Decimal
+    reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,12 +309,272 @@ def compute_summary(
     )
 
 
+def compute_category_breakdown(
+    session: Session,
+    user_id: int,
+    range_: DateRange,
+    *,
+    limit: int = DEFAULT_TOP_CATEGORIES_LIMIT,
+) -> list[CategoryBreakdown]:
+    """Public wrapper cho `/analytics/categories`."""
+    totals = _query_period_totals(session, user_id, range_)
+    return _query_top_categories(
+        session,
+        user_id,
+        range_,
+        totals.total_spend,
+        limit=limit,
+    )
+
+
+def compute_merchant_breakdown(
+    session: Session,
+    user_id: int,
+    range_: DateRange,
+    *,
+    limit: int = 10,
+) -> list[MerchantBreakdown]:
+    """Top merchants theo tổng chi trong range.
+
+    Chỉ đọc `transactions`, đúng source-of-truth cho analytics tiền.
+    Transaction không có merchant_name được gom vào "Không rõ".
+    """
+    totals = _query_period_totals(session, user_id, range_)
+    total_spend = totals.total_spend
+
+    merchant_expr = func.coalesce(Transaction.merchant_name, "Không rõ").label("merchant")
+    total_expr = func.coalesce(func.sum(Transaction.amount), 0).label("total")
+    statement = (
+        select(
+            merchant_expr,
+            total_expr,
+            func.count(Transaction.id).label("cnt"),
+        )
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.transaction_date >= range_.start)
+        .where(Transaction.transaction_date <= range_.end)
+        .group_by(merchant_expr)
+        .order_by(total_expr.desc())
+        .limit(limit)
+    )
+
+    rows = session.exec(statement).all()
+    items: list[MerchantBreakdown] = []
+    for row in rows:
+        merchant_name = str(row[0] or "Không rõ")
+        amount = Decimal(str(row[1])) if row[1] is not None else Decimal("0")
+        count = int(row[2] or 0)
+        if total_spend > 0:
+            percentage = float(round((amount / total_spend) * Decimal("100"), 2))
+        else:
+            percentage = 0.0
+        items.append(
+            MerchantBreakdown(
+                merchant_name=merchant_name,
+                total_amount=amount,
+                transaction_count=count,
+                percentage=percentage,
+            ),
+        )
+    return items
+
+
+def _query_transactions_for_range(
+    session: Session,
+    user_id: int,
+    range_: DateRange,
+) -> list[Transaction]:
+    statement = (
+        select(Transaction)
+        .where(Transaction.user_id == user_id)
+        .where(Transaction.transaction_date >= range_.start)
+        .where(Transaction.transaction_date <= range_.end)
+        .order_by(col(Transaction.transaction_date).asc(), col(Transaction.id).asc())
+    )
+    return list(session.exec(statement).all())
+
+
+def _period_key(value: date, group_by: str) -> tuple[date, date]:
+    if group_by == "week":
+        start = value - timedelta(days=value.weekday())
+        return start, start + timedelta(days=6)
+    if group_by == "month":
+        start = value.replace(day=1)
+        if start.month == 12:
+            next_month = date(start.year + 1, 1, 1)
+        else:
+            next_month = date(start.year, start.month + 1, 1)
+        return start, next_month - timedelta(days=1)
+    return value, value
+
+
+def compute_spending_trends(
+    session: Session,
+    user_id: int,
+    range_: DateRange,
+    *,
+    group_by: str = "day",
+) -> list[TrendPoint]:
+    """Return spending series from confirmed transactions only."""
+    transactions = _query_transactions_for_range(session, user_id, range_)
+    grouped: dict[tuple[date, date], tuple[Decimal, int]] = defaultdict(lambda: (Decimal("0"), 0))
+    for transaction in transactions:
+        key = _period_key(transaction.transaction_date, group_by)
+        total, count = grouped[key]
+        grouped[key] = (total + transaction.amount, count + 1)
+
+    points: list[TrendPoint] = []
+    if group_by == "day":
+        current = range_.start
+        while current <= range_.end:
+            total, count = grouped.get((current, current), (Decimal("0"), 0))
+            points.append(
+                TrendPoint(
+                    period_start=current,
+                    period_end=current,
+                    amount=total,
+                    transaction_count=count,
+                ),
+            )
+            current += timedelta(days=1)
+        return points
+
+    for (period_start, period_end), (amount, count) in sorted(grouped.items()):
+        points.append(
+            TrendPoint(
+                period_start=max(period_start, range_.start),
+                period_end=min(period_end, range_.end),
+                amount=amount,
+                transaction_count=count,
+            ),
+        )
+    return points
+
+
+def _category_name_map(session: Session, category_ids: set[int]) -> dict[int, str]:
+    if not category_ids:
+        return {}
+    rows = session.exec(select(Category).where(col(Category.id).in_(category_ids))).all()
+    return {category.id: category.name for category in rows if category.id is not None}
+
+
+def compute_calendar_days(
+    session: Session,
+    user_id: int,
+    range_: DateRange,
+) -> list[CalendarDay]:
+    transactions = _query_transactions_for_range(session, user_id, range_)
+    totals_by_day: dict[date, Decimal] = defaultdict(lambda: Decimal("0"))
+    counts_by_day: dict[date, int] = defaultdict(int)
+    category_totals_by_day: dict[date, dict[int, Decimal]] = defaultdict(
+        lambda: defaultdict(lambda: Decimal("0")),
+    )
+
+    category_ids: set[int] = set()
+    for transaction in transactions:
+        day = transaction.transaction_date
+        totals_by_day[day] += transaction.amount
+        counts_by_day[day] += 1
+        if transaction.category_id is not None:
+            category_ids.add(transaction.category_id)
+            category_totals_by_day[day][transaction.category_id] += transaction.amount
+
+    non_zero_totals = [amount for amount in totals_by_day.values() if amount > 0]
+    max_total = max(non_zero_totals, default=Decimal("0"))
+    avg_total = (
+        sum(non_zero_totals, Decimal("0")) / len(non_zero_totals)
+        if non_zero_totals
+        else Decimal("0")
+    )
+    category_names = _category_name_map(session, category_ids)
+
+    days: list[CalendarDay] = []
+    current = range_.start
+    while current <= range_.end:
+        amount = totals_by_day.get(current, Decimal("0"))
+        count = counts_by_day.get(current, 0)
+        if amount <= 0 or max_total <= 0:
+            intensity = 0
+        else:
+            intensity = min(4, max(1, int((amount / max_total) * Decimal("4"))))
+        is_unusual = bool(amount > 0 and avg_total > 0 and amount >= avg_total * Decimal("2"))
+        if is_unusual:
+            intensity = 4
+
+        top_category_name = None
+        day_category_totals = category_totals_by_day.get(current, {})
+        if day_category_totals:
+            top_category_id = max(day_category_totals.items(), key=lambda item: item[1])[0]
+            top_category_name = category_names.get(top_category_id)
+
+        days.append(
+            CalendarDay(
+                date=current,
+                amount=amount,
+                transaction_count=count,
+                intensity=intensity,
+                top_category_name=top_category_name,
+                is_unusual=is_unusual,
+            ),
+        )
+        current += timedelta(days=1)
+    return days
+
+
+def compute_spending_anomalies(
+    session: Session,
+    user_id: int,
+    range_: DateRange,
+    *,
+    limit: int = 10,
+) -> list[SpendingAnomaly]:
+    transactions = _query_transactions_for_range(session, user_id, range_)
+    if len(transactions) < 3:
+        return []
+
+    total = sum((transaction.amount for transaction in transactions), Decimal("0"))
+    baseline = total / len(transactions)
+    threshold = baseline * Decimal("2")
+    anomalies: list[SpendingAnomaly] = []
+    for transaction in sorted(transactions, key=lambda tx: tx.amount, reverse=True):
+        if transaction.id is None or transaction.amount < threshold:
+            continue
+        over_percent = ((transaction.amount - baseline) / baseline) * Decimal("100")
+        severity = "danger" if transaction.amount >= baseline * Decimal("3") else "warning"
+        anomalies.append(
+            SpendingAnomaly(
+                id=f"tx_{transaction.id}_large",
+                type="large_transaction",
+                severity=severity,
+                title="Giao dịch lớn bất thường",
+                transaction_id=transaction.id,
+                merchant_name=transaction.merchant_name,
+                transaction_date=transaction.transaction_date,
+                amount=transaction.amount,
+                baseline_amount=baseline,
+                reason=f"Cao hơn trung bình {round(over_percent, 2)}% trong kỳ.",
+            ),
+        )
+        if len(anomalies) >= limit:
+            break
+    return anomalies
+
+
 __all__ = [
     "DEFAULT_RECENT_TRANSACTIONS_LIMIT",
     "DEFAULT_TOP_CATEGORIES_LIMIT",
     "CategoryBreakdown",
     "DashboardSummary",
+    "CalendarDay",
+    "MerchantBreakdown",
     "PeriodTotals",
     "RecentTransactionItem",
+    "SpendingAnomaly",
+    "TrendPoint",
+    "compute_category_breakdown",
+    "compute_calendar_days",
+    "compute_merchant_breakdown",
+    "compute_spending_anomalies",
+    "compute_spending_trends",
     "compute_summary",
 ]

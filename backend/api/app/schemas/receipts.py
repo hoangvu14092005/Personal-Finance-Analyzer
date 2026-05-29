@@ -13,6 +13,45 @@ class ReceiptUploadResponse(BaseModel):
     status: str
 
 
+class LinkedTransactionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transaction_id: int
+    status: str
+
+
+class ReceiptListItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    receipt_id: int
+    file_name: str
+    content_type: str
+    status: str
+    ocr_status: str
+    merchant_name: str | None
+    receipt_date: date | None
+    total_amount: Decimal | None
+    currency: str | None
+    has_invoice: bool
+    created_at: datetime
+    linked_transaction: LinkedTransactionResponse | None
+
+
+class ReceiptListMeta(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total: int
+    page: int
+    size: int
+
+
+class ReceiptListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ReceiptListItemResponse]
+    meta: ReceiptListMeta
+
+
 class ReceiptStatusResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -60,6 +99,7 @@ class DraftReviewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     receipt_id: int
+    linked_transaction: LinkedTransactionResponse | None = None
     receipt_status: str
     provider: str
     confidence: float | None
@@ -70,6 +110,35 @@ class DraftReviewResponse(BaseModel):
     suggested_category_id: int | None
     raw_text: str | None
     line_items: list[LineItemResponse]
+
+
+class ReceiptConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    merchant_name: str | None = None
+    transaction_date: date | None = None
+    amount: Decimal | None = None
+    currency: str | None = None
+    category_id: int | None = None
+    note: str | None = None
+    save_merchant_alias: bool = True
+
+
+class ReceiptConfirmResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    receipt_id: int
+    receipt_status: str
+    transaction_id: int
+
+
+class ReceiptImageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    receipt_id: int
+    file_name: str
+    content_type: str
+    storage_key: str
 
 
 class InvoiceLineItemResponse(BaseModel):

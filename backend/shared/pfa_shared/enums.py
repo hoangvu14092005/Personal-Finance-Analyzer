@@ -12,7 +12,7 @@ class AppEnv(StrEnum):
     PROD = "prod"
 
     @classmethod
-    def from_value(cls, value: str) -> "AppEnv":
+    def from_value(cls, value: str) -> AppEnv:
         """Parse string -> enum, fallback to LOCAL."""
         normalized = value.strip().lower()
         for member in cls:

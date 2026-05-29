@@ -8,13 +8,13 @@ Mỗi function:
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
 from sqlmodel import Session, col, func, select
 
-from app.models.entities import Category, Transaction
+from app.models.entities import Category, Invoice, ReceiptUpload, Transaction
 from app.services.analytics import compute_summary
 from app.services.budgets import compute_budget_usage
 from app.services.date_ranges import (
@@ -39,6 +39,54 @@ def _decimal_str(value: Decimal) -> str:
 def _current_period_month() -> str:
     today = date.today()
     return f"{today.year:04d}-{today.month:02d}"
+
+
+def _parse_iso_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _iso_datetime(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _linked_transaction_payload(transaction: Transaction | None) -> dict[str, Any] | None:
+    if transaction is None or transaction.id is None:
+        return None
+    return {
+        "transaction_id": transaction.id,
+        "status": transaction.status,
+        "transaction_date": transaction.transaction_date.isoformat(),
+        "amount": _decimal_str(transaction.amount),
+        "currency": transaction.currency,
+    }
+
+
+def _receipt_payload(
+    receipt: ReceiptUpload,
+    *,
+    transaction: Transaction | None = None,
+    invoice: Invoice | None = None,
+) -> dict[str, Any]:
+    return {
+        "receipt_id": receipt.id,
+        "file_name": receipt.file_name,
+        "content_type": receipt.content_type,
+        "status": receipt.status,
+        "ocr_status": receipt.ocr_status,
+        "merchant_name": receipt.merchant_name,
+        "receipt_date": receipt.receipt_date.isoformat() if receipt.receipt_date else None,
+        "total_amount": _decimal_str(receipt.total_amount) if receipt.total_amount else None,
+        "currency": receipt.currency,
+        "has_invoice": receipt.has_invoice,
+        "invoice_id": invoice.id if invoice is not None else None,
+        "created_at": _iso_datetime(receipt.created_at),
+        "linked_transaction": _linked_transaction_payload(transaction),
+    }
 
 
 def query_spending_summary(
@@ -162,6 +210,177 @@ def search_transactions(
     return {
         "transactions": transactions,
         "total_count": int(total_count),
+        "showing": len(transactions),
+    }
+
+
+def search_receipts(
+    session: Session,
+    user_id: int,
+    *,
+    receipt_date: str | None = None,
+    created_date: str | None = None,
+    merchant: str | None = None,
+    status: str | None = None,
+    ocr_status: str | None = None,
+    has_transaction: bool | None = None,
+    has_invoice: bool | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Tra cứu chứng từ/hóa đơn theo metadata của receipt upload.
+
+    Dùng cho intent hỏi về chứng từ: hóa đơn đã upload, hóa đơn theo ngày
+    trên chứng từ, trạng thái OCR, hoặc receipt/invoice có transaction chưa.
+    Không dùng kết quả này để tính tổng chi tiêu chính thức.
+    """
+    capped_limit = min(max(limit, 1), 50)
+    parsed_receipt_date = _parse_iso_date(receipt_date)
+    parsed_created_date = _parse_iso_date(created_date)
+
+    statement = select(ReceiptUpload).where(ReceiptUpload.user_id == user_id)
+    if parsed_receipt_date is not None:
+        statement = statement.where(ReceiptUpload.receipt_date == parsed_receipt_date)
+    if parsed_created_date is not None:
+        statement = statement.where(func.date(ReceiptUpload.created_at) == parsed_created_date)
+    if merchant:
+        escaped = merchant.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        statement = statement.where(col(ReceiptUpload.merchant_name).ilike(f"%{escaped}%"))
+    if status:
+        statement = statement.where(ReceiptUpload.status == status)
+    if ocr_status:
+        statement = statement.where(ReceiptUpload.ocr_status == ocr_status)
+    if has_invoice is not None:
+        statement = statement.where(ReceiptUpload.has_invoice == has_invoice)
+
+    rows = list(
+        session.exec(
+            statement.order_by(col(ReceiptUpload.created_at).desc(), col(ReceiptUpload.id).desc()),
+        ).all(),
+    )
+    receipt_ids = [receipt.id for receipt in rows if receipt.id is not None]
+
+    tx_by_receipt: dict[int, Transaction] = {}
+    if receipt_ids:
+        tx_rows = session.exec(
+            select(Transaction).where(
+                Transaction.user_id == user_id,
+                col(Transaction.receipt_upload_id).in_(receipt_ids),
+            ),
+        ).all()
+        tx_by_receipt = {
+            tx.receipt_upload_id: tx
+            for tx in tx_rows
+            if tx.receipt_upload_id is not None
+        }
+
+    if has_transaction is not None:
+        rows = [
+            receipt
+            for receipt in rows
+            if ((receipt.id in tx_by_receipt) if receipt.id is not None else False)
+            == has_transaction
+        ]
+        receipt_ids = [receipt.id for receipt in rows if receipt.id is not None]
+
+    invoice_by_receipt: dict[int, Invoice] = {}
+    if receipt_ids:
+        invoice_rows = session.exec(
+            select(Invoice).where(
+                Invoice.user_id == user_id,
+                col(Invoice.receipt_upload_id).in_(receipt_ids),
+            ),
+        ).all()
+        invoice_by_receipt = {invoice.receipt_upload_id: invoice for invoice in invoice_rows}
+
+    page_rows = rows[:capped_limit]
+    receipts = [
+        _receipt_payload(
+            receipt,
+            transaction=tx_by_receipt.get(receipt.id or -1),
+            invoice=invoice_by_receipt.get(receipt.id or -1),
+        )
+        for receipt in page_rows
+    ]
+
+    return {
+        "receipts": receipts,
+        "total_count": len(rows),
+        "showing": len(receipts),
+        "source_of_truth_note": (
+            "Receipt/Invoice là chứng từ; tổng chi tiêu chính thức nằm ở transactions."
+        ),
+    }
+
+
+def lookup_transaction_receipts(
+    session: Session,
+    user_id: int,
+    *,
+    merchant: str | None = None,
+    transaction_date: str | None = None,
+    date_range: str | None = None,
+    has_receipt: bool | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Tìm giao dịch và cho biết mỗi giao dịch có chứng từ liên kết hay không."""
+    capped_limit = min(max(limit, 1), 50)
+    parsed_transaction_date = _parse_iso_date(transaction_date)
+
+    statement = select(Transaction).where(Transaction.user_id == user_id)
+    if merchant:
+        escaped = merchant.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        statement = statement.where(col(Transaction.merchant_name).ilike(f"%{escaped}%"))
+    if parsed_transaction_date is not None:
+        statement = statement.where(Transaction.transaction_date == parsed_transaction_date)
+    elif date_range:
+        preset = _resolve_preset(date_range)
+        range_ = resolve_range(preset)
+        statement = statement.where(Transaction.transaction_date >= range_.start)
+        statement = statement.where(Transaction.transaction_date <= range_.end)
+    if has_receipt is not None:
+        if has_receipt:
+            statement = statement.where(Transaction.receipt_upload_id.is_not(None))  # type: ignore[union-attr]
+        else:
+            statement = statement.where(Transaction.receipt_upload_id.is_(None))  # type: ignore[union-attr]
+
+    rows = list(
+        session.exec(
+            statement.order_by(
+                col(Transaction.transaction_date).desc(),
+                col(Transaction.id).desc(),
+            ),
+        ).all(),
+    )
+    receipt_ids = [tx.receipt_upload_id for tx in rows if tx.receipt_upload_id is not None]
+
+    receipt_by_id: dict[int, ReceiptUpload] = {}
+    if receipt_ids:
+        receipt_rows = session.exec(
+            select(ReceiptUpload).where(
+                ReceiptUpload.user_id == user_id,
+                col(ReceiptUpload.id).in_(receipt_ids),
+            ),
+        ).all()
+        receipt_by_id = {receipt.id: receipt for receipt in receipt_rows if receipt.id is not None}
+
+    transactions = []
+    for tx in rows[:capped_limit]:
+        receipt = receipt_by_id.get(tx.receipt_upload_id or -1)
+        transactions.append({
+            "transaction_id": tx.id,
+            "merchant_name": tx.merchant_name,
+            "amount": _decimal_str(tx.amount),
+            "currency": tx.currency,
+            "transaction_date": tx.transaction_date.isoformat(),
+            "source": tx.source,
+            "status": tx.status,
+            "has_receipt": receipt is not None,
+            "receipt": _receipt_payload(receipt, transaction=tx) if receipt is not None else None,
+        })
+
+    return {
+        "transactions": transactions,
+        "total_count": len(rows),
         "showing": len(transactions),
     }
 
@@ -392,6 +611,8 @@ __all__ = [
     "get_recent_transactions",
     "get_spending_by_day",
     "get_top_merchants",
+    "lookup_transaction_receipts",
     "query_spending_summary",
+    "search_receipts",
     "search_transactions",
 ]

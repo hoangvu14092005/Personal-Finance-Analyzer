@@ -2,7 +2,7 @@
 
 ## Mục tiêu
 Redesign toàn bộ UI frontend theo design system PostHog-style (DESIGN.md):
-- Cream canvas (#eeefe9) end-to-end
+- White canvas (#ffffff) end-to-end
 - Single yellow CTA (#f7a501) cho primary actions
 - IBM Plex Sans typography
 - Card với hairline borders (không drop-shadow)
@@ -39,7 +39,7 @@ Redesign toàn bộ UI frontend theo design system PostHog-style (DESIGN.md):
 - Tất cả pages match DESIGN.md spec
 - Typography consistent IBM Plex Sans
 - Primary CTA dùng yellow #f7a501 nhất quán
-- Canvas cream #eeefe9 mọi page
+- Canvas white #ffffff mọi page
 - Cards flat với hairline, không shadow
 - Responsive mobile/tablet/desktop
 - Lighthouse accessibility ≥ 90

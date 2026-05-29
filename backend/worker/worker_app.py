@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Load .env from worker folder before CommonSettings.from_env() reads os.environ.
+# Load root .env before CommonSettings.from_env() reads os.environ.
 # Must run BEFORE importing pfa_shared.config.
 try:
     from dotenv import load_dotenv
-    _env_path = Path(__file__).parent / ".env"
-    if _env_path.exists():
-        load_dotenv(_env_path)
+
+    _root_env_path = Path(__file__).resolve().parents[2] / ".env"
+    _legacy_env_path = Path(__file__).parent / ".env"
+    if _root_env_path.exists():
+        load_dotenv(_root_env_path)
+    elif _legacy_env_path.exists():
+        load_dotenv(_legacy_env_path)
 except ImportError:
     # dotenv optional — fallback to shell env vars
     pass

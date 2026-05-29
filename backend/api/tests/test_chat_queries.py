@@ -7,18 +7,21 @@ Verify:
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from app.models.entities import Category, Transaction, User
+from app.models.entities import Category, Invoice, ReceiptUpload, Transaction, User
+from app.services.chat.intent_routing import AssistantIntent, classify_assistant_intent
 from app.services.chat.queries import (
     compare_periods,
     get_budget_status,
     get_recent_transactions,
     get_spending_by_day,
     get_top_merchants,
+    lookup_transaction_receipts,
     query_spending_summary,
+    search_receipts,
     search_transactions,
 )
 from sqlmodel import Session
@@ -86,6 +89,99 @@ def _seed_transactions(
     db_session.commit()
 
 
+@pytest.fixture()
+def _seed_receipts(
+    db_session: Session, user_a: int, user_b: int, category: int,
+) -> None:
+    """Seed receipt evidence with one linked transaction and one isolated upload."""
+    receipt = ReceiptUpload(
+        user_id=user_a,
+        file_name="highlands.jpg",
+        content_type="image/jpeg",
+        file_size_bytes=1234,
+        storage_key="receipts/a/highlands.jpg",
+        merchant_name="Highlands Coffee",
+        receipt_date=date(2026, 5, 18),
+        total_amount=Decimal("68000"),
+        currency="VND",
+        status="ready",
+        ocr_status="ready",
+        has_invoice=True,
+        created_at=datetime(2026, 5, 19, 8, 30),
+    )
+    unlinked = ReceiptUpload(
+        user_id=user_a,
+        file_name="grab.png",
+        content_type="image/png",
+        file_size_bytes=2345,
+        storage_key="receipts/a/grab.png",
+        merchant_name="Grab",
+        receipt_date=date(2026, 5, 20),
+        total_amount=Decimal("42000"),
+        currency="VND",
+        status="ready",
+        ocr_status="ready",
+        created_at=datetime(2026, 5, 20, 9, 0),
+    )
+    other_user = ReceiptUpload(
+        user_id=user_b,
+        file_name="starbucks.jpg",
+        content_type="image/jpeg",
+        file_size_bytes=3456,
+        storage_key="receipts/b/starbucks.jpg",
+        merchant_name="Starbucks",
+        receipt_date=date(2026, 5, 18),
+        total_amount=Decimal("500000"),
+        currency="VND",
+        status="ready",
+        ocr_status="ready",
+        created_at=datetime(2026, 5, 19, 10, 0),
+    )
+    db_session.add(receipt)
+    db_session.add(unlinked)
+    db_session.add(other_user)
+    db_session.commit()
+    db_session.refresh(receipt)
+
+    db_session.add(
+        Transaction(
+            user_id=user_a,
+            category_id=category,
+            receipt_upload_id=receipt.id,
+            merchant_name="Highlands Coffee",
+            amount=Decimal("68000"),
+            currency="VND",
+            transaction_date=date(2026, 5, 18),
+            source="ocr",
+            status="confirmed",
+        ),
+    )
+    db_session.add(
+        Transaction(
+            user_id=user_a,
+            category_id=category,
+            merchant_name="No Receipt Shop",
+            amount=Decimal("120000"),
+            currency="VND",
+            transaction_date=date(2026, 5, 18),
+            source="manual",
+            status="confirmed",
+        ),
+    )
+    db_session.add(
+        Invoice(
+            user_id=user_a,
+            receipt_upload_id=receipt.id or 0,
+            seller_name="Highlands Coffee",
+            invoice_number="INV-001",
+            issue_date=date(2026, 5, 18),
+            grand_total=Decimal("68000"),
+            currency="VND",
+        ),
+    )
+    db_session.commit()
+
+
 class TestQuerySpendingSummary:
     @pytest.mark.usefixtures("_seed_transactions")
     def test_returns_summary(self, db_session: Session, user_a: int) -> None:
@@ -138,6 +234,84 @@ class TestSearchTransactions:
         )
         # Only transactions >= 200k (200k and 300k)
         assert result["total_count"] == 2
+
+
+class TestSearchReceipts:
+    @pytest.mark.usefixtures("_seed_receipts")
+    def test_search_by_receipt_date(self, db_session: Session, user_a: int) -> None:
+        result = search_receipts(db_session, user_a, receipt_date="2026-05-18")
+        assert result["total_count"] == 1
+        assert result["receipts"][0]["merchant_name"] == "Highlands Coffee"
+        assert result["receipts"][0]["linked_transaction"]["status"] == "confirmed"
+
+    @pytest.mark.usefixtures("_seed_receipts")
+    def test_distinguishes_created_date_from_receipt_date(
+        self,
+        db_session: Session,
+        user_a: int,
+    ) -> None:
+        by_upload_date = search_receipts(db_session, user_a, created_date="2026-05-19")
+        by_receipt_date = search_receipts(db_session, user_a, receipt_date="2026-05-19")
+
+        assert by_upload_date["total_count"] == 1
+        assert by_upload_date["receipts"][0]["receipt_date"] == "2026-05-18"
+        assert by_receipt_date["total_count"] == 0
+
+    @pytest.mark.usefixtures("_seed_receipts")
+    def test_filters_linked_and_invoice_receipts(self, db_session: Session, user_a: int) -> None:
+        linked = search_receipts(db_session, user_a, has_transaction=True)
+        unlinked = search_receipts(db_session, user_a, has_transaction=False)
+        invoices = search_receipts(db_session, user_a, has_invoice=True)
+
+        assert linked["total_count"] == 1
+        assert linked["receipts"][0]["linked_transaction"] is not None
+        assert unlinked["total_count"] == 1
+        assert unlinked["receipts"][0]["linked_transaction"] is None
+        assert invoices["total_count"] == 1
+        assert invoices["receipts"][0]["invoice_id"] is not None
+
+    @pytest.mark.usefixtures("_seed_receipts")
+    def test_user_isolation(self, db_session: Session, user_a: int) -> None:
+        result = search_receipts(db_session, user_a, merchant="Starbucks")
+        assert result["total_count"] == 0
+
+
+class TestLookupTransactionReceipts:
+    @pytest.mark.usefixtures("_seed_receipts")
+    def test_returns_receipt_metadata_for_linked_transaction(
+        self,
+        db_session: Session,
+        user_a: int,
+    ) -> None:
+        result = lookup_transaction_receipts(
+            db_session,
+            user_a,
+            merchant="Highlands",
+            transaction_date="2026-05-18",
+        )
+
+        assert result["total_count"] == 1
+        tx = result["transactions"][0]
+        assert tx["has_receipt"] is True
+        assert tx["receipt"]["receipt_id"] is not None
+        assert tx["receipt"]["merchant_name"] == "Highlands Coffee"
+
+    @pytest.mark.usefixtures("_seed_receipts")
+    def test_can_filter_transactions_without_receipts(
+        self,
+        db_session: Session,
+        user_a: int,
+    ) -> None:
+        result = lookup_transaction_receipts(
+            db_session,
+            user_a,
+            transaction_date="2026-05-18",
+            has_receipt=False,
+        )
+
+        assert result["total_count"] == 1
+        assert result["transactions"][0]["merchant_name"] == "No Receipt Shop"
+        assert result["transactions"][0]["receipt"] is None
 
 
 class TestGetBudgetStatus:
@@ -206,3 +380,23 @@ class TestGetRecentTransactions:
         assert result["count"] == 1
         # Only Starbucks for user B
         assert result["transactions"][0]["merchant_name"] == "Starbucks"
+
+
+class TestAssistantIntentRouting:
+    def test_routes_spending_questions_to_transaction_intent(self) -> None:
+        assert (
+            classify_assistant_intent("Hôm qua tôi tiêu bao nhiêu?")
+            == AssistantIntent.SPENDING_SUMMARY
+        )
+
+    def test_routes_receipt_lookup_questions_to_receipt_intent(self) -> None:
+        assert (
+            classify_assistant_intent("Xem hóa đơn tôi upload hôm qua")
+            == AssistantIntent.RECEIPT_LOOKUP
+        )
+
+    def test_routes_transaction_receipt_questions_to_link_intent(self) -> None:
+        assert (
+            classify_assistant_intent("Giao dịch Highlands hôm qua có hóa đơn không?")
+            == AssistantIntent.TRANSACTION_RECEIPT_LOOKUP
+        )

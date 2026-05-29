@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache  # cache kết quả để tránh đọc config nhiều lần
+from pathlib import Path
 from typing import Literal
 
 from pfa_shared.enums import AppEnv
@@ -11,12 +12,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # giá trị này khi `app_env` ∈ {staging, prod} để fail-fast (M5).
 DEFAULT_JWT_SECRET = "change-me-in-prod-please-use-at-least-32-chars"  # noqa: S105
 MIN_JWT_SECRET_LENGTH = 32
+ROOT_ENV_FILE = Path(__file__).resolve().parents[4] / ".env"
 
 
 class Settings(BaseSettings):
-    # Pydantic tự động đọc .env và map các biến environment vào field tương ứng.
+    # Root .env is the single source of truth for the whole local stack.
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=ROOT_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )

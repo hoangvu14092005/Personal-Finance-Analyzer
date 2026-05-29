@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from pfa_shared.entities import Invoice, InvoiceLineItem, OcrResult, ReceiptLineItem, ReceiptUpload, Transaction
+from pfa_shared.entities import Invoice, InvoiceLineItem, OcrResult, ReceiptLineItem, ReceiptUpload
 from pfa_shared.enums import ReceiptStatus
 from pfa_shared.storage import (
     StorageNotFoundError,
@@ -105,57 +105,6 @@ def _save_invoice(
         ))
 
 
-def _auto_create_transaction(
-    session: Session,
-    receipt_id: int,
-    user_id: int,
-    invoice_result: OCRInvoiceResult,
-) -> None:
-    """Auto-create Transaction from invoice data after OCR.
-
-    Creates a single Transaction with grand_total (or subtotal_before_tax as fallback).
-    Skips if a Transaction already exists for this receipt (idempotent).
-    """
-    from datetime import date as date_type
-
-    # Check if transaction already exists for this receipt
-    existing_tx = session.exec(
-        select(Transaction).where(Transaction.receipt_upload_id == receipt_id),
-    ).first()
-    if existing_tx is not None:
-        return  # Already created, skip
-
-    # Determine amount: prefer grand_total, fallback to subtotal_before_tax
-    amount = invoice_result.grand_total or invoice_result.subtotal_before_tax
-    if amount is None or amount <= 0:
-        return  # No valid amount, skip transaction creation
-
-    # Determine date: prefer issue_date, fallback to today
-    tx_date: date_type
-    if invoice_result.issue_date:
-        try:
-            tx_date = date_type.fromisoformat(invoice_result.issue_date)
-        except (ValueError, TypeError):
-            tx_date = date_type.today()
-    else:
-        tx_date = date_type.today()
-
-    # Determine merchant name from seller
-    merchant_name = invoice_result.seller_name or "Unknown"
-
-    session.add(
-        Transaction(
-            user_id=user_id,
-            receipt_upload_id=receipt_id,
-            merchant_name=merchant_name,
-            amount=amount,
-            currency=invoice_result.currency or "VND",
-            transaction_date=tx_date,
-            note=f"Tự động từ hóa đơn #{invoice_result.invoice_number or receipt_id}",
-        ),
-    )
-
-
 def run_ocr_for_receipt(
     session: Session,
     storage: StorageService,
@@ -180,6 +129,7 @@ def run_ocr_for_receipt(
 
     # Step 1: Mark PROCESSING (idempotent)
     receipt.status = ReceiptStatus.PROCESSING.value
+    receipt.ocr_status = "running"
     receipt.error_code = None
     receipt.error_message = None
     session.add(receipt)
@@ -248,6 +198,7 @@ def run_ocr_for_receipt(
         for idx, line_item in enumerate(normalized.line_items):
             session.add(
                 ReceiptLineItem(
+                    user_id=receipt.user_id,
                     receipt_upload_id=receipt_id,
                     line_number=idx,
                     item_name=line_item.item_name,
@@ -262,11 +213,31 @@ def run_ocr_for_receipt(
         invoice_result = provider.normalize_invoice(raw_result)
         _save_invoice(session, receipt_id, receipt.user_id, invoice_result)
 
-        # Step 4.7: Auto-create Transaction from invoice data
-        _auto_create_transaction(session, receipt_id, receipt.user_id, invoice_result)
+        # Step 4.7: Cache document summary on receipt_uploads for retrieval.
+        # Financial source-of-truth is still created later by /receipts/{id}/confirm.
+        from datetime import date as date_type
+
+        receipt.merchant_name = normalized.merchant or invoice_result.seller_name
+        receipt.total_amount = normalized.total_amount or invoice_result.grand_total
+        receipt.currency = normalized.currency or invoice_result.currency
+        try:
+            receipt.receipt_date = (
+                date_type.fromisoformat(normalized.transaction_date)
+                if normalized.transaction_date
+                else None
+            )
+        except (TypeError, ValueError):
+            receipt.receipt_date = None
+        receipt.has_invoice = bool(
+            invoice_result.invoice_number
+            or invoice_result.seller_tax_id
+            or invoice_result.grand_total
+            or invoice_result.line_items
+        )
 
         # Step 5: Mark READY
         receipt.status = ReceiptStatus.READY.value
+        receipt.ocr_status = "succeeded"
         receipt.error_code = None
         receipt.error_message = None
         session.add(receipt)
@@ -279,6 +250,7 @@ def run_ocr_for_receipt(
         receipt = session.get(ReceiptUpload, receipt_id)
         if receipt is not None:
             receipt.status = ReceiptStatus.FAILED.value
+            receipt.ocr_status = "failed"
             receipt.error_code = "ocr_failed"
             receipt.error_message = str(exc)[:500]
             session.add(receipt)

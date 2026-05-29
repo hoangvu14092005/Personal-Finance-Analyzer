@@ -30,7 +30,7 @@ Hoàn thành MVP của **Personal Finance Analyzer (Web)** với kiến trúc t�
 | 5 | Budgets | Budget CRUD, usage calculation, warnings |
 | 6 | AI Chatbot | Chat conversational với function calling, query on-demand từ DB thực, không hallucinate |
 | 7 | RAG Extension | pgvector + embedding, 2 RAG tools (search_receipt_text, semantic_search_transactions) |
-| 8 | UI Redesign | Apply DESIGN.md: cream canvas + yellow CTA + IBM Plex Sans + cards hairline |
+| 8 | UI Redesign | Apply DESIGN.md: white canvas + yellow CTA + IBM Plex Sans + cards hairline |
 | 9 | Hardening, UAT & Release | Observability, security, performance, test pack, release checklist |
 | 10 | Post-MVP | Export, insight history, OCR optimization, personalization |
 
@@ -175,6 +175,14 @@ Mở rộng chatbot sang hybrid retrieval: SQL tools (số liệu) + RAG tools (
 - Tool semantic_search_transactions: search theo ý nghĩa mơ hồ
 - System prompt update với RAG usage rules
 
+### Deferred hardening
+- Unit tests cho RAG retrieval với mock embedding client.
+- Sửa receipt RAG filter để tìm được receipt chưa confirm theo `receipt_uploads.merchant_name`, `receipt_date`, `created_at`.
+- Trả structured evidence gồm chunk_id, score/distance, receipt metadata, invoice/transaction links.
+- Bổ sung hybrid keyword + vector search và rerank nếu retrieval chất lượng chưa đủ.
+- Thêm deterministic date parser tiếng Việt cho “hôm qua”, “tuần trước”, “ngày 18/5”.
+- Apply `category_name` filter thật cho `semantic_search_transactions`.
+
 ### Done khi
 - User hỏi "Hóa đơn Grab ngày X có món gì?" → bot trả đúng từ OCR
 - User hỏi "Tôi có mua đồ skincare không?" → semantic match được
@@ -195,7 +203,7 @@ Apply design system mô tả trong DESIGN.md (PostHog-style) cho toàn bộ fron
 - Accessibility Lighthouse ≥ 90
 
 ### Done khi
-- Canvas cream #eeefe9, yellow CTA #f7a501, IBM Plex Sans ở mọi page
+- Canvas white #ffffff, yellow CTA #f7a501, IBM Plex Sans ở mọi page
 - Cards flat với hairline borders, không drop-shadow
 - Chat UI có mascot + bubbles phân biệt user/assistant đúng spec
 - E2E Playwright tests pass sau migration

@@ -39,7 +39,7 @@ class CommonSettings:
     ocr_max_file_size_mb: int
 
     @classmethod
-    def from_env(cls) -> "CommonSettings":
+    def from_env(cls) -> CommonSettings:
         """
         Tạo settings từ environment variables.
         Defaults phù hợp cho local dev (Docker Compose).

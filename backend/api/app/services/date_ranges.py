@@ -28,6 +28,10 @@ from enum import StrEnum
 class RangePreset(StrEnum):
     LAST_7_DAYS = "7d"
     LAST_30_DAYS = "30d"
+    LAST_90_DAYS = "90d"
+    LAST_3_MONTHS = "3m"
+    LAST_6_MONTHS = "6m"
+    LAST_12_MONTHS = "12m"
     THIS_MONTH = "this_month"
     LAST_MONTH = "last_month"
     CUSTOM = "custom"
@@ -89,6 +93,18 @@ def resolve_range(
     if preset is RangePreset.LAST_30_DAYS:
         return DateRange(start=today - timedelta(days=29), end=today)
 
+    if preset is RangePreset.LAST_90_DAYS:
+        return DateRange(start=today - timedelta(days=89), end=today)
+
+    if preset is RangePreset.LAST_3_MONTHS:
+        return DateRange(start=today - timedelta(days=89), end=today)
+
+    if preset is RangePreset.LAST_6_MONTHS:
+        return DateRange(start=today - timedelta(days=179), end=today)
+
+    if preset is RangePreset.LAST_12_MONTHS:
+        return DateRange(start=today - timedelta(days=364), end=today)
+
     if preset is RangePreset.THIS_MONTH:
         first_of_month = today.replace(day=1)
         return DateRange(start=first_of_month, end=today)
@@ -142,7 +158,7 @@ def previous_period(current: DateRange, preset: RangePreset) -> DateRange:
             end=date(prev_year, prev_month, last_day),
         )
 
-    # 7d / 30d / custom: rolling window cùng kích thước.
+    # Rolling/custom presets: cùng độ dài N ngày.
     days = current.days
     end = current.start - timedelta(days=1)
     start = end - timedelta(days=days - 1)

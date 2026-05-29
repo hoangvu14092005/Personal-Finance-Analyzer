@@ -59,7 +59,6 @@ def set_auth_cookie(response: Response, token: str) -> None:
         samesite=settings.session_cookie_samesite,  # CSRF protection
         max_age=settings.jwt_access_expire_minutes * 60,
         path="/",
-        domain="localhost",  # Allow cookie to work across localhost and 127.0.0.1
     )
 
 
@@ -71,5 +70,4 @@ def clear_auth_cookie(response: Response) -> None:
         path="/",
         secure=settings.session_cookie_secure,
         samesite=settings.session_cookie_samesite,
-        domain="localhost",
     )

@@ -4,7 +4,7 @@
 
 Redesign toàn bộ UI frontend theo design system mô tả trong `DESIGN.md` (PostHog-style).
 Design hiện tại đang dùng slate palette, generic Tailwind defaults. Design mới mang tính
-chất "engineering sketchbook" với cream canvas, single yellow CTA, IBM Plex Sans typography,
+chất "engineering sketchbook" với white canvas, single yellow CTA, IBM Plex Sans typography,
 card với hairline borders.
 
 ### Bối cảnh
@@ -21,7 +21,7 @@ card với hairline borders.
 ## Glossary
 
 - **Design Tokens**: màu, typography, spacing, radius được định nghĩa trong DESIGN.md.
-- **Cream Canvas**: màu nền chủ đạo `#eeefe9` (colors.canvas).
+- **White Canvas**: màu nền chủ đạo `#ffffff` (colors.canvas).
 - **Yellow CTA**: màu primary action `#f7a501` (colors.primary).
 - **Hairline Border**: đường viền 1px `#bfc1b7` (colors.hairline) thay cho drop-shadow.
 - **Hedgehog Mascot**: illustration cartoon — brand decoration signature.
@@ -63,11 +63,11 @@ card với hairline borders.
 **User Story:** Navigation và footer phải theo style mới trên mọi page.
 
 #### Acceptance Criteria
-1. THE primary nav SHALL theo `primary-nav` spec: cream background, ink text, height 56px, wordmark + yellow "Get started" CTA ở xa phải.
+1. THE primary nav SHALL theo `primary-nav` spec: white background, ink text, height 56px, wordmark + yellow "Get started" CTA ở xa phải.
 2. THE nav SHALL hiển thị app name kèm mascot illustration (emoji placeholder OK cho MVP: 🦔 hoặc 💰).
 3. THE nav SHALL collapse thành hamburger drawer ở mobile (< 768px).
-4. THE footer SHALL theo `footer-section` spec: cream background, hairline top rule, 3-column link grid ở desktop, 2-up mobile.
-5. THE page layout SHALL continue cream canvas edge-to-edge, không có shaded section bands.
+4. THE footer SHALL theo `footer-section` spec: white background, hairline top rule, 3-column link grid ở desktop, 2-up mobile.
+5. THE page layout SHALL continue white canvas edge-to-edge, không có shaded section bands.
 
 ### Requirement 4: Page-specific redesign
 
@@ -191,7 +191,7 @@ card với hairline borders.
 1. Tất cả pages (auth, dashboard, transactions, receipts, budgets, chat) SHALL match DESIGN.md spec.
 2. Typography consistent dùng IBM Plex Sans.
 3. Primary CTA SHALL dùng yellow `#f7a501` nhất quán.
-4. Canvas SHALL cream `#eeefe9` ở mọi page.
+4. Canvas SHALL white `#ffffff` ở mọi page.
 5. Card SHALL flat với hairline border, không drop-shadow.
 6. Responsive ở mobile/tablet/desktop.
 7. E2E tests pass.
