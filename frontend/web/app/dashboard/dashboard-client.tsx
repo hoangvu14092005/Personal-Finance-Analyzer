@@ -2,14 +2,27 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import type { FormEvent, ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  ChevronRight,
+  PiggyBank,
+  ReceiptText,
+  Sparkles,
+  TrendingDown,
+  TrendingUp,
+  UploadCloud,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
 
 import { getMe } from "@/lib/auth-api";
 import type { BudgetUsage } from "@/lib/budgets-api";
 import {
   DashboardSummary,
   DEFAULT_RANGE_PRESET,
-  PREVIOUS_RANGE_LABELS,
   RangePreset,
   RANGE_LABELS,
   RANGE_PRESETS,
@@ -17,10 +30,6 @@ import {
   isRangePreset,
 } from "@/lib/dashboard-api";
 
-import { CategoryChart } from "./category-chart";
-
-// Khi range=custom mà user chưa chọn ngày → tự động dùng 30 ngày gần nhất
-// để gọi API thử (tránh request 400 khi vừa switch tab).
 function todayIso(): string {
   const now = new Date();
   return [
@@ -40,47 +49,30 @@ function shiftIso(iso: string, days: number): string {
   ].join("-");
 }
 
-function formatVnd(amount: string): string {
-  const numeric = Number(amount);
-  if (!Number.isFinite(numeric)) return amount;
-  return numeric.toLocaleString("vi-VN", { maximumFractionDigits: 0 });
-}
-
-function formatAmount(amount: string, currency: string): string {
-  const numeric = Number(amount);
-  if (!Number.isFinite(numeric)) {
-    return `${amount} ${currency}`;
-  }
-  return `${numeric.toLocaleString("vi-VN", { maximumFractionDigits: 2 })} ${currency}`;
+function formatMoney(value: string | number, currency = "VND"): string {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return `${value} ${currency}`;
+  return `${numeric.toLocaleString("vi-VN", { maximumFractionDigits: 0 })} ${currency}`;
 }
 
 function formatDate(iso: string): string {
-  // 2026-04-15 → 15/04/2026
   const [y, m, d] = iso.split("-");
-  if (!y || !m || !d) return iso;
-  return `${d}/${m}/${y}`;
+  return y && m && d ? `${d}/${m}/${y}` : iso;
 }
 
-function formatDelta(deltaAmount: string, deltaPercent: number | null): {
-  label: string;
-  color: string;
-  arrow: string;
-} {
+function formatDelta(deltaAmount: string, deltaPercent: number | null) {
   const numeric = Number(deltaAmount);
   if (!Number.isFinite(numeric) || numeric === 0) {
-    return { label: "Không đổi", color: "text-mute", arrow: "→" };
+    return { label: "Không đổi", color: "text-mute", tone: "neutral" as const };
   }
-  // Tăng chi tiêu = đỏ (xấu), giảm = xanh (tốt).
-  const isUp = numeric > 0;
-  const color = isUp ? "text-accent-red" : "text-accent-green";
-  const arrow = isUp ? "↑" : "↓";
-  const sign = isUp ? "+" : "−";
-  const absVnd = formatVnd(String(Math.abs(numeric)));
-  if (deltaPercent === null) {
-    return { label: `${sign}${absVnd} VND`, color, arrow };
-  }
-  const pct = Math.abs(deltaPercent).toFixed(1);
-  return { label: `${sign}${absVnd} VND (${sign}${pct}%)`, color, arrow };
+  const isIncrease = numeric > 0;
+  const sign = isIncrease ? "+" : "-";
+  const pct = deltaPercent === null ? "" : ` (${sign}${Math.abs(deltaPercent).toFixed(1)}%)`;
+  return {
+    label: `${sign}${formatMoney(Math.abs(numeric))}${pct}`,
+    color: isIncrease ? "text-accent-red" : "text-accent-green",
+    tone: isIncrease ? ("risk" as const) : ("good" as const),
+  };
 }
 
 type FilterState = {
@@ -102,24 +94,26 @@ function readFiltersFromSearch(params: URLSearchParams): FilterState {
 export function DashboardClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-
   const [authReady, setAuthReady] = useState(false);
+  const [displayName, setDisplayName] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>(() =>
     readFiltersFromSearch(new URLSearchParams(searchParams.toString())),
   );
   const [data, setData] = useState<DashboardSummary | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Auth gate.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    void (async () => {
       try {
-        await getMe();
-        if (!cancelled) setAuthReady(true);
+        const { user } = await getMe();
+        if (!cancelled) {
+          setDisplayName(user.full_name?.trim() || user.email);
+          setAuthReady(true);
+        }
       } catch {
-        if (!cancelled) router.replace("/login");
+        router.replace("/login?next=/dashboard");
       }
     })();
     return () => {
@@ -127,16 +121,12 @@ export function DashboardClient() {
     };
   }, [router]);
 
-  // Sync URL ↔ state khi search params đổi (vd. user click back).
   useEffect(() => {
     setFilters(readFiltersFromSearch(new URLSearchParams(searchParams.toString())));
   }, [searchParams]);
 
-  // Build query params cho API call (custom thiếu ngày → fallback 30d auto-fill).
   const apiParams = useMemo(() => {
-    if (filters.preset !== "custom") {
-      return { range: filters.preset };
-    }
+    if (filters.preset !== "custom") return { range: filters.preset };
     if (filters.startDate && filters.endDate) {
       return {
         range: "custom" as const,
@@ -144,57 +134,42 @@ export function DashboardClient() {
         end_date: filters.endDate,
       };
     }
-    // Custom chưa nhập đủ → tránh 400, dùng 30 ngày gần nhất tạm để có dữ liệu.
     const end = todayIso();
     const start = shiftIso(end, -29);
     return { range: "custom" as const, start_date: start, end_date: end };
   }, [filters]);
 
-  // Fetch dữ liệu khi authReady + apiParams đổi.
   const refetch = useCallback(async () => {
-    setIsLoading(true);
-    setErrorMessage(null);
+    setLoading(true);
+    setError(null);
     try {
       const summary = await getDashboardSummary(apiParams);
       setData(summary);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Không thể tải dữ liệu";
-      setErrorMessage(message);
+      setError(err instanceof Error ? err.message : "Không thể tải dashboard");
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   }, [apiParams]);
 
   useEffect(() => {
-    if (!authReady) return;
-    void refetch();
+    if (authReady) void refetch();
   }, [authReady, refetch]);
 
-  const onSelectPreset = (preset: RangePreset) => {
-    const newFilters: FilterState = { ...filters, preset };
-    if (preset !== "custom") {
-      newFilters.startDate = "";
-      newFilters.endDate = "";
-    }
-    setFilters(newFilters);
-    // Sync URL.
+  const selectPreset = (preset: RangePreset) => {
     const next = new URLSearchParams();
     next.set("range", preset);
-    if (preset === "custom" && newFilters.startDate && newFilters.endDate) {
-      next.set("start_date", newFilters.startDate);
-      next.set("end_date", newFilters.endDate);
-    }
     router.replace(`/dashboard?${next.toString()}`);
   };
 
-  const onSubmitCustom = (event: FormEvent<HTMLFormElement>) => {
+  const submitCustom = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!filters.startDate || !filters.endDate) {
-      setErrorMessage("Vui lòng nhập cả ngày bắt đầu và ngày kết thúc.");
+      setError("Vui lòng chọn đủ ngày bắt đầu và kết thúc.");
       return;
     }
     if (filters.startDate > filters.endDate) {
-      setErrorMessage("Ngày bắt đầu phải <= ngày kết thúc.");
+      setError("Ngày bắt đầu phải trước ngày kết thúc.");
       return;
     }
     const next = new URLSearchParams();
@@ -204,87 +179,81 @@ export function DashboardClient() {
     router.replace(`/dashboard?${next.toString()}`);
   };
 
-  // Auth chưa xong: render placeholder.
   if (!authReady) {
-    return (
-      <section className="rounded-md border border-hairline bg-surface-card p-8">
-        <p className="text-sm text-body">Đang xác thực phiên đăng nhập...</p>
-      </section>
-    );
+    return <ShellLoading label="Đang kiểm tra phiên đăng nhập..." />;
   }
 
   return (
     <div className="space-y-6">
-      {/* Header + filter tabs */}
-      <header className="space-y-4 rounded-md border border-hairline bg-surface-card p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-ink">Dashboard</h1>
-            <p className="text-sm text-mute">
-              Tổng quan chi tiêu và so sánh kỳ trước
+      <header className="space-y-4">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="max-w-3xl">
+            <h1 className="text-xl font-bold tracking-tight text-ink">
+              Chào mừng trở lại{displayName ? `, ${displayName}` : ""}!
+            </h1>
+            <p className="mt-0.5 text-sm text-ash">
+              Xem báo cáo tổng thể, ngân sách và phân tích tài chính ngày hôm nay.
             </p>
           </div>
-          <Link
-            href="/transactions/new"
-            className="rounded-lg border border-hairline bg-surface-card px-3 py-1.5 text-sm font-medium text-body hover:bg-surface-soft"
-          >
-            Thêm giao dịch
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/receipts/upload"
+              className="rounded-lg bg-accent-green px-4 py-2.5 text-sm font-medium text-on-dark shadow-sm hover:bg-primary-pressed"
+            >
+              Tải hóa đơn lên
+            </Link>
+            <Link
+              href="/transactions/new"
+              className="rounded-lg border border-hairline bg-white px-4 py-2.5 text-sm font-medium text-ink hover:bg-surface-soft"
+            >
+              Ghi chép giao dịch
+            </Link>
+          </div>
         </div>
 
-        <nav className="flex flex-wrap gap-2" aria-label="Khoảng thời gian">
-          {RANGE_PRESETS.map((preset) => {
-            const active = filters.preset === preset;
-            return (
-              <button
-                key={preset}
-                type="button"
-                onClick={() => onSelectPreset(preset)}
-                className={
-                  "rounded-full px-3 py-1.5 text-sm font-medium transition " +
-                  (active
-                    ? "bg-ink text-white"
-                    : "border border-hairline bg-surface-card text-body hover:bg-surface-soft")
-                }
-                aria-pressed={active}
-              >
-                {RANGE_LABELS[preset]}
-              </button>
-            );
-          })}
-        </nav>
+        <div className="mt-5 flex flex-wrap gap-2">
+          {RANGE_PRESETS.filter((preset) => preset !== "custom").map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => selectPreset(preset)}
+              className={`rounded-lg border px-3 py-2 text-button-sm transition-colors ${
+                filters.preset === preset
+                  ? "border-ink bg-ink text-on-dark"
+                  : "border-hairline-soft bg-surface-doc text-body hover:text-ink"
+              }`}
+            >
+              {RANGE_LABELS[preset]}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setFilters((prev) => ({ ...prev, preset: "custom" }))}
+            className={`rounded-lg border px-3 py-2 text-button-sm transition-colors ${
+              filters.preset === "custom"
+                ? "border-ink bg-ink text-on-dark"
+                : "border-hairline-soft bg-surface-doc text-body hover:text-ink"
+            }`}
+          >
+            Tùy chỉnh
+          </button>
+        </div>
 
         {filters.preset === "custom" && (
-          <form
-            className="flex flex-wrap items-end gap-3"
-            onSubmit={onSubmitCustom}
-            aria-label="Khoảng tùy chỉnh"
-          >
-            <label className="flex flex-col text-xs font-medium text-body">
-              Từ ngày
-              <input
-                type="date"
-                value={filters.startDate}
-                onChange={(e) =>
-                  setFilters((prev) => ({ ...prev, startDate: e.target.value }))
-                }
-                className="mt-1 rounded-lg border border-hairline px-3 py-1.5 text-sm"
-              />
-            </label>
-            <label className="flex flex-col text-xs font-medium text-body">
-              Đến ngày
-              <input
-                type="date"
-                value={filters.endDate}
-                onChange={(e) =>
-                  setFilters((prev) => ({ ...prev, endDate: e.target.value }))
-                }
-                className="mt-1 rounded-lg border border-hairline px-3 py-1.5 text-sm"
-              />
-            </label>
+          <form onSubmit={submitCustom} className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+            <DateInput
+              label="Từ ngày"
+              value={filters.startDate}
+              onChange={(value) => setFilters((prev) => ({ ...prev, startDate: value }))}
+            />
+            <DateInput
+              label="Đến ngày"
+              value={filters.endDate}
+              onChange={(value) => setFilters((prev) => ({ ...prev, endDate: value }))}
+            />
             <button
               type="submit"
-              className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white hover:bg-charcoal"
+              className="self-end rounded-lg bg-ink px-4 py-2 text-button-sm font-bold text-on-dark"
             >
               Áp dụng
             </button>
@@ -292,452 +261,294 @@ export function DashboardClient() {
         )}
       </header>
 
-      {/* Error banner */}
-      {errorMessage && (
-        <div
-          className="flex items-center justify-between rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-accent-red"
-          role="alert"
-        >
-          <span>{errorMessage}</span>
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            className="rounded-md border border-rose-300 bg-surface-card px-3 py-1 text-xs font-medium text-accent-red hover:bg-accent-red-soft"
-          >
+      {error && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-accent-red/20 bg-accent-red-soft p-4 text-body-sm text-accent-red">
+          <span>{error}</span>
+          <button type="button" onClick={() => void refetch()} className="font-bold underline">
             Thử lại
           </button>
         </div>
       )}
 
-      {/* Loading skeleton */}
-      {isLoading && !data && <DashboardSkeleton />}
-
-      {/* Empty state khi đã load xong nhưng count=0 */}
-      {!isLoading && data && data.current.transaction_count === 0 && (
-        <EmptyState />
-      )}
-
-      {/* Data grid */}
-      {data && data.current.transaction_count > 0 && (
-        <DashboardContent data={data} isRefreshing={isLoading} />
-      )}
+      {loading && !data && <DashboardSkeleton />}
+      {!loading && data && data.current.transaction_count === 0 && <EmptyState />}
+      {data && data.current.transaction_count > 0 && <DashboardContent data={data} refreshing={loading} />}
     </div>
+  );
+}
+
+function DateInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="space-y-1">
+      <span className="text-caption-xs text-mute">{label}</span>
+      <input
+        type="date"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-10 w-full rounded-lg border border-hairline-soft bg-surface-card px-3 text-body-sm text-ink"
+      />
+    </label>
+  );
+}
+
+function ShellLoading({ label }: { label: string }) {
+  return (
+    <section className="rounded-2xl border border-hairline-soft bg-surface-card p-8">
+      <p className="text-body-sm text-mute">{label}</p>
+    </section>
   );
 }
 
 function DashboardSkeleton() {
   return (
-    <div className="space-y-4" aria-label="Đang tải dashboard">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {[1, 2, 3].map((i) => (
-          <div
-            key={i}
-            className="h-28 animate-pulse rounded-md border border-hairline bg-surface-soft"
-          />
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {[1, 2, 3, 4].map((item) => (
+          <div key={item} className="h-32 animate-pulse rounded-2xl border border-hairline-soft bg-surface-soft" />
         ))}
       </div>
-      <div className="h-56 animate-pulse rounded-md border border-hairline bg-surface-soft" />
-      <div className="h-72 animate-pulse rounded-md border border-hairline bg-surface-soft" />
+      <div className="grid gap-4 xl:grid-cols-12">
+        <div className="h-80 animate-pulse rounded-2xl border border-hairline-soft bg-surface-soft xl:col-span-8" />
+        <div className="h-80 animate-pulse rounded-2xl border border-hairline-soft bg-surface-soft xl:col-span-4" />
+      </div>
     </div>
   );
 }
 
 function EmptyState() {
   return (
-    <section className="space-y-3 rounded-md border border-dashed border-hairline bg-surface-card p-10 text-center">
-      <h2 className="text-lg font-semibold text-ink">
-        Chưa có giao dịch trong kỳ này
-      </h2>
-      <p className="mx-auto max-w-md text-sm text-mute">
-        Bắt đầu thêm giao dịch hoặc upload biên lai để dashboard có dữ liệu phân
-        tích.
+    <section className="rounded-xl border border-dashed border-hairline bg-white p-10 text-center">
+      <p className="text-caption-xs font-bold uppercase tracking-wide text-mute">Chưa có giao dịch</p>
+      <h2 className="mt-2 text-heading-lg text-ink">Chưa có dữ liệu để phân tích</h2>
+      <p className="mx-auto mt-2 max-w-xl text-body-sm text-body">
+        Ghi chép giao dịch thủ công hoặc tải hóa đơn lên để AI bóc tách rồi lưu vào sổ ví.
       </p>
-      <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
-        <Link
-          href="/transactions/new"
-          className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white hover:bg-charcoal"
-        >
-          Thêm giao dịch thủ công
+      <div className="mt-5 flex flex-wrap justify-center gap-3">
+        <Link href="/receipts/upload" className="rounded-lg bg-accent-green px-4 py-2 text-button-sm font-bold text-on-dark">
+          Tải hóa đơn lên
         </Link>
-        <Link
-          href="/receipts/upload"
-          className="rounded-lg border border-hairline bg-surface-card px-4 py-2 text-sm font-medium text-body hover:bg-surface-soft"
-        >
-          Upload biên lai
+        <Link href="/transactions/new" className="rounded-lg border border-hairline bg-surface-card px-4 py-2 text-button-sm font-bold text-ink">
+          Ghi chép giao dịch
         </Link>
       </div>
     </section>
   );
 }
 
-function DashboardContent({
-  data,
-  isRefreshing,
-}: {
-  data: DashboardSummary;
-  isRefreshing: boolean;
-}) {
+function DashboardContent({ data, refreshing }: { data: DashboardSummary; refreshing: boolean }) {
   const delta = formatDelta(data.delta_amount, data.delta_percent);
+  const budgetRisk = useMemo(() => {
+    const exceeded = data.budgets_usage.filter((item) => item.status === "exceeded").length;
+    const warning = data.budgets_usage.filter((item) => item.status === "warning").length;
+    return { exceeded, warning };
+  }, [data.budgets_usage]);
+  const topCategory = data.top_categories[0];
+  const highestBudget = data.budgets_usage[0];
 
   return (
-    <section className={isRefreshing ? "space-y-6 opacity-70" : "space-y-6"}>
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <SummaryCard
+    <section className={`space-y-5 ${refreshing ? "opacity-70" : ""}`}>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard
           label="Tổng chi tiêu"
-          value={`${formatVnd(data.current.total_spend)} VND`}
-          hint={`${data.range.days} ngày: ${formatDate(data.range.start)} → ${formatDate(data.range.end)}`}
+          value={formatMoney(data.current.total_spend)}
+          detail={`${data.current.transaction_count} giao dịch · ${data.range.days} ngày`}
+          tone="red"
+          icon={ArrowDownRight}
         />
-        <SummaryCard
-          label="Số giao dịch"
-          value={String(data.current.transaction_count)}
-          hint={`Trung bình ${(data.current.transaction_count / Math.max(1, data.range.days)).toFixed(1)} / ngày`}
+        <StatCard
+          label="Biến động kỳ này"
+          value={<span className={delta.color}>{delta.label}</span>}
+          detail={`So với ${formatDate(data.previous_range.start)} - ${formatDate(data.previous_range.end)}`}
+          tone={delta.tone === "risk" ? "red" : delta.tone === "good" ? "green" : "neutral"}
+          icon={delta.tone === "good" ? TrendingDown : TrendingUp}
         />
-        <SummaryCard
-          label={PREVIOUS_RANGE_LABELS[data.range.preset]}
-          value={
-            <span className={delta.color}>
-              {delta.arrow} {delta.label}
-            </span>
-          }
-          hint={`Kỳ trước: ${formatVnd(data.previous.total_spend)} VND`}
+        <StatCard
+          label="Cảnh báo ngân sách"
+          value={`${budgetRisk.exceeded + budgetRisk.warning}`}
+          detail={`${budgetRisk.exceeded} vượt · ${budgetRisk.warning} sắp vượt`}
+          tone={budgetRisk.exceeded > 0 ? "red" : budgetRisk.warning > 0 ? "amber" : "green"}
+          icon={PiggyBank}
+        />
+        <StatCard
+          label="Danh mục nổi bật"
+          value={topCategory?.name ?? "Chưa có"}
+          detail={topCategory ? `${formatMoney(topCategory.total_amount)} · ${topCategory.percentage.toFixed(1)}%` : "Chờ thêm dữ liệu"}
+          tone="blue"
+          icon={Wallet}
         />
       </div>
 
-      {/* Previous period comparison block */}
-      <section className="rounded-md border border-hairline bg-surface-card p-6">
-        <header className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-ink">
-            So sánh kỳ trước
-          </h2>
-          <span className="text-xs text-mute">
-            {formatDate(data.previous_range.start)} → {formatDate(data.previous_range.end)}
-          </span>
-        </header>
-        <PreviousPeriodCompare data={data} />
-      </section>
+      <div className="grid gap-4 xl:grid-cols-12">
+        <Panel className="xl:col-span-8" title="Chi tiêu theo danh mục" eyebrow="Phân tích dòng tiền" action={<Link href="/analytics" className="text-button-sm text-accent-green hover:underline">Phân tích chi tiết</Link>}>
+          <CategoryBars categories={data.top_categories} total={Number(data.current.total_spend) || 1} />
+        </Panel>
 
-      {/* Category chart */}
-      <section className="space-y-3 rounded-md border border-hairline bg-surface-card p-6">
-        <header className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-ink">
-            Phân bổ theo danh mục
-          </h2>
-          <span className="text-xs text-mute">
-            {data.top_categories.length} danh mục
-          </span>
-        </header>
-        <CategoryChart
-          categories={data.top_categories}
-          totalSpend={data.current.total_spend}
-        />
-      </section>
+        <Panel className="xl:col-span-4" title="Cơ cấu ngân sách" eyebrow="Ngưỡng kiểm soát">
+          <div className="space-y-4">
+            {highestBudget ? (
+              <BudgetRiskCard usage={highestBudget} />
+            ) : (
+              <div className="rounded-xl border border-dashed border-hairline-soft p-4 text-body-sm text-mute">
+                Chưa có budget. Tạo budget để bật cảnh báo sớm.
+              </div>
+            )}
+            <div className="rounded-xl border border-hairline-soft bg-surface-doc p-4">
+              <p className="text-caption-xs font-bold uppercase tracking-wide text-mute">Ghi chú dữ liệu</p>
+              <p className="mt-2 text-body-sm text-body">
+                Hóa đơn OCR cần được xác nhận thành giao dịch trước khi cộng vào báo cáo và ngân sách.
+              </p>
+            </div>
+          </div>
+        </Panel>
+      </div>
 
-      {/* Budget usage (Phase 5.4) */}
-      <BudgetsSection
-        budgetPeriod={data.budget_period}
-        usages={data.budgets_usage}
-      />
-
-      {/* Top categories list */}
-      <section className="space-y-3 rounded-md border border-hairline bg-surface-card p-6">
-        <header className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-ink">
-            Top danh mục chi tiêu
-          </h2>
-          <span className="text-xs text-mute">
-            {data.top_categories.length} danh mục
-          </span>
-        </header>
-        <ul className="space-y-3">
-          {data.top_categories.map((cat) => (
-            <li key={`${cat.category_id ?? "uncat"}-${cat.name}`} className="space-y-1">
-              <div className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2 font-medium text-charcoal">
-                  <span
-                    className="inline-block h-3 w-3 rounded-full"
-                    style={{ backgroundColor: cat.color ?? "#94a3b8" }}
-                    aria-hidden="true"
-                  />
-                  {cat.name}
-                  <span className="text-xs font-normal text-mute">
-                    ({cat.transaction_count} giao dịch)
-                  </span>
-                </span>
-                <span className="font-medium text-ink">
-                  {formatVnd(cat.total_amount)} VND ·{" "}
-                  <span className="text-mute">{cat.percentage.toFixed(1)}%</span>
-                </span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-surface-soft">
-                <div
-                  className="h-full rounded-full"
-                  style={{
-                    width: `${Math.min(100, Math.max(0, cat.percentage))}%`,
-                    backgroundColor: cat.color ?? "#64748b",
-                  }}
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {/* Recent transactions */}
-      <section className="space-y-3 rounded-md border border-hairline bg-surface-card p-6">
-        <header className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-ink">
-            Giao dịch gần đây
-          </h2>
-          <Link
-            href="/transactions"
-            className="text-sm font-medium text-body hover:text-ink"
-          >
-            Xem tất cả →
-          </Link>
-        </header>
-        <ul className="divide-y divide-hairline-soft">
-          {data.recent_transactions.map((tx) => (
-            <li key={tx.id} className="flex items-center justify-between py-3 text-sm">
-              <div>
-                <p className="font-medium text-ink">
-                  {tx.merchant_name ?? "(Không có merchant)"}
-                </p>
-                <p className="text-xs text-mute">
-                  {formatDate(tx.transaction_date)}
-                  {tx.category_name ? ` · ${tx.category_name}` : ""}
-                </p>
-              </div>
-              <div className="font-medium text-ink">
-                {formatAmount(tx.amount, tx.currency)}
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <div className="grid gap-4 xl:grid-cols-12">
+        <Panel className="xl:col-span-7" title="Giao dịch phát sinh gần đây" eyebrow="Nhật ký giao dịch" action={<Link href="/transactions" className="text-button-sm text-accent-green hover:underline">Nhật ký giao dịch</Link>}>
+          <RecentTransactions data={data} />
+        </Panel>
+        <Panel className="xl:col-span-5" title="Thao tác nhanh" eyebrow="Lối tắt">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+            <ActionCard href="/receipts/upload" title="Tải hóa đơn lên (OCR)" body="AI bóc tách hóa đơn, bạn kiểm tra rồi ghi vào sổ ví." />
+            <ActionCard href="/insights" title="Thông tin Insights" body="Nhận gợi ý tối ưu chi tiêu dựa trên giao dịch thực tế." />
+            <ActionCard href="/chat" title="Trợ lý tài chính (AI)" body="Đặt câu hỏi về chi tiêu, ngân sách hoặc hóa đơn bằng tiếng Việt." />
+          </div>
+        </Panel>
+      </div>
     </section>
   );
 }
 
-function SummaryCard({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: React.ReactNode;
-  hint?: string;
-}) {
+function StatCard({ label, value, detail, tone, icon: Icon }: { label: string; value: ReactNode; detail: string; tone: "red" | "green" | "amber" | "blue" | "neutral"; icon: LucideIcon }) {
+  const toneClass = {
+    red: "bg-accent-red-soft text-accent-red",
+    green: "bg-accent-green-soft text-accent-green",
+    amber: "bg-primary/20 text-primary-active",
+    blue: "bg-accent-blue-soft text-link-blue",
+    neutral: "bg-surface-soft text-body",
+  }[tone];
+
   return (
-    <div className="rounded-md border border-hairline bg-surface-card p-5">
-      <p className="text-xs font-medium uppercase tracking-wide text-mute">
-        {label}
-      </p>
-      <p className="mt-2 text-2xl font-bold text-ink">{value}</p>
-      {hint && <p className="mt-1 text-xs text-mute">{hint}</p>}
-    </div>
+    <article className="rounded-xl border border-hairline-soft bg-white p-5 transition-all hover:shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-caption-xs font-bold uppercase tracking-wide text-mute">{label}</p>
+          <p className="mt-3 text-2xl font-black text-ink">{value}</p>
+        </div>
+        <span className={`flex h-11 w-11 items-center justify-center rounded-lg ${toneClass}`} aria-hidden>
+          <Icon className="h-5.5 w-5.5 stroke-[2.2]" />
+        </span>
+      </div>
+      <p className="mt-3 text-caption-sm text-mute">{detail}</p>
+    </article>
   );
 }
 
-function PreviousPeriodCompare({ data }: { data: DashboardSummary }) {
-  const current = Number(data.current.total_spend);
-  const previous = Number(data.previous.total_spend);
-  // Tính chiều rộng bar relative — chuẩn hóa theo max để 2 thanh cùng scale.
-  const max = Math.max(current, previous, 1);
-  const currentWidth = (current / max) * 100;
-  const previousWidth = (previous / max) * 100;
+function Panel({ title, eyebrow, action, className = "", children }: { title: string; eyebrow: string; action?: ReactNode; className?: string; children: ReactNode }) {
+  return (
+    <section className={`rounded-xl border border-hairline-soft bg-white p-5 ${className}`}>
+      <div className="mb-5 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-caption-xs font-bold uppercase tracking-wide text-mute">{eyebrow}</p>
+          <h2 className="mt-1 text-heading-sm-mixed text-ink">{title}</h2>
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
 
-  const delta = formatDelta(data.delta_amount, data.delta_percent);
-
+function CategoryBars({ categories, total }: { categories: DashboardSummary["top_categories"]; total: number }) {
+  if (categories.length === 0) {
+    return <p className="text-body-sm text-mute">Chưa có danh mục để hiển thị.</p>;
+  }
   return (
     <div className="space-y-4">
-      {/* Bar so sánh */}
-      <div className="space-y-2">
-        <CompareBar
-          label="Kỳ này"
-          amount={current}
-          width={currentWidth}
-          color="bg-ink"
-          count={data.current.transaction_count}
-        />
-        <CompareBar
-          label="Kỳ trước"
-          amount={previous}
-          width={previousWidth}
-          color="bg-slate-400"
-          count={data.previous.transaction_count}
-        />
-      </div>
-
-      {/* Tổng hợp delta */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface-soft/60 px-4 py-3 text-sm">
-        <span className="text-body">Chênh lệch</span>
-        <span className={`font-semibold ${delta.color}`}>
-          {delta.arrow} {delta.label}
-        </span>
-      </div>
+      {categories.slice(0, 7).map((category, index) => {
+        const amount = Number(category.total_amount) || 0;
+        const width = Math.max(4, (amount / total) * 100);
+        return (
+          <div key={`${category.category_id ?? "category"}-${category.name}`} className="grid gap-2 md:grid-cols-[150px_1fr_120px] md:items-center">
+            <div className="flex items-center gap-2">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-surface-soft text-caption-xs font-black text-mute">
+                {index + 1}
+              </span>
+              <span className="truncate text-body-sm font-semibold text-ink">{category.name}</span>
+            </div>
+            <div className="h-3 overflow-hidden rounded-full bg-surface-soft">
+              <div
+                className="h-full rounded-full bg-accent-green"
+                style={{ width: `${Math.min(100, width)}%` }}
+              />
+            </div>
+            <div className="text-right text-caption-sm text-mute">
+              <span className="font-bold text-ink">{formatMoney(category.total_amount)}</span>
+              <span className="block">{category.percentage.toFixed(1)}%</span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function CompareBar({
-  label,
-  amount,
-  width,
-  color,
-  count,
-}: {
-  label: string;
-  amount: number;
-  width: number;
-  color: string;
-  count: number;
-}) {
+function BudgetRiskCard({ usage }: { usage: BudgetUsage }) {
+  const statusLabel = usage.status === "exceeded" ? "Vượt ngân sách" : usage.status === "warning" ? "Sắp vượt" : "An toàn";
+  const statusClass = usage.status === "exceeded" ? "text-accent-red" : usage.status === "warning" ? "text-primary-active" : "text-accent-green";
   return (
-    <div>
-      <div className="mb-1 flex items-center justify-between text-sm">
-        <span className="font-medium text-body">{label}</span>
-        <span className="text-ink">
-          {formatVnd(String(amount))} VND
-          <span className="ml-2 text-xs text-mute">({count} GD)</span>
-        </span>
-      </div>
-      <div className="h-3 overflow-hidden rounded-full bg-surface-soft">
-        <div
-          className={`h-full rounded-full ${color}`}
-          style={{ width: `${Math.min(100, Math.max(0, width))}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function budgetStatusBadgeClass(status: BudgetUsage["status"]): string {
-  switch (status) {
-    case "exceeded":
-      return "bg-accent-red-soft text-rose-800 border-rose-200";
-    case "warning":
-      return "bg-accent-purple-soft text-amber-800 border-amber-200";
-    case "safe":
-    default:
-      return "bg-accent-green-soft text-emerald-800 border-emerald-200";
-  }
-}
-
-function budgetStatusLabel(status: BudgetUsage["status"]): string {
-  switch (status) {
-    case "exceeded":
-      return "Vượt";
-    case "warning":
-      return "Sắp vượt";
-    case "safe":
-    default:
-      return "An toàn";
-  }
-}
-
-function budgetProgressColor(status: BudgetUsage["status"]): string {
-  switch (status) {
-    case "exceeded":
-      return "bg-accent-red";
-    case "warning":
-      return "bg-accent-purple";
-    case "safe":
-    default:
-      return "bg-accent-green";
-  }
-}
-
-function BudgetsSection({
-  budgetPeriod,
-  usages,
-}: {
-  budgetPeriod: string;
-  usages: BudgetUsage[];
-}) {
-  // Empty state: chưa set budget nào → CTA sang /budgets.
-  if (usages.length === 0) {
-    return (
-      <section className="space-y-2 rounded-md border border-dashed border-hairline bg-surface-card p-6 text-center">
-        <h2 className="text-base font-semibold text-ink">
-          Ngân sách tháng {budgetPeriod}
-        </h2>
-        <p className="text-sm text-mute">
-          Bạn chưa đặt ngân sách nào cho tháng này.
-        </p>
-        <Link
-          href="/budgets"
-          className="inline-block rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white hover:bg-charcoal"
-        >
-          Đặt ngân sách
-        </Link>
-      </section>
-    );
-  }
-
-  // Backend đã sort theo percent_used DESC — giữ nguyên thứ tự này.
-  return (
-    <section className="space-y-4 rounded-md border border-hairline bg-surface-card p-6">
-      <header className="flex items-center justify-between">
+    <div className="rounded-lg border border-hairline-soft p-4">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-ink">
-            Ngân sách tháng {budgetPeriod}
-          </h2>
-          <p className="text-xs text-mute">
-            Sắp xếp theo % sử dụng — danh mục sắp vượt lên đầu.
-          </p>
+        <p className="text-caption-xs font-bold uppercase tracking-wide text-mute">Danh mục cần chú ý</p>
+          <p className="mt-1 text-body-strong text-ink">{usage.category_name}</p>
         </div>
-        <Link
-          href="/budgets"
-          className="text-sm font-medium text-body hover:text-ink"
-        >
-          Quản lý →
-        </Link>
-      </header>
+        <span className={`text-caption-md font-bold ${statusClass}`}>{statusLabel}</span>
+      </div>
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-surface-soft">
+        <div
+          className={usage.status === "exceeded" ? "h-full bg-accent-red" : usage.status === "warning" ? "h-full bg-primary" : "h-full bg-accent-green"}
+          style={{ width: `${Math.min(100, usage.percent_used)}%` }}
+        />
+      </div>
+      <p className="mt-3 text-caption-sm text-mute">
+        {formatMoney(usage.spent_amount)} / {formatMoney(usage.budget_amount)} · {usage.percent_used.toFixed(0)}%
+      </p>
+    </div>
+  );
+}
 
-      <ul className="space-y-3">
-        {usages.map((u) => {
-          const barWidth = Math.min(100, u.percent_used);
-          return (
-            <li key={u.budget_id} className="space-y-1">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span className="flex items-center gap-2 font-medium text-charcoal">
-                  {u.category_color ? (
-                    <span
-                      aria-hidden
-                      className="h-3 w-3 rounded-full"
-                      style={{ backgroundColor: u.category_color }}
-                    />
-                  ) : null}
-                  {u.category_name}
-                  <span
-                    className={`rounded-full border px-2 py-0.5 text-xs font-medium ${budgetStatusBadgeClass(
-                      u.status,
-                    )}`}
-                  >
-                    {budgetStatusLabel(u.status)}
-                  </span>
-                </span>
-                <span className="text-ink">
-                  {formatVnd(u.spent_amount)} /{" "}
-                  <span className="text-mute">{formatVnd(u.budget_amount)}</span>
-                  <span className="ml-2 text-xs font-medium text-body">
-                    {u.percent_used.toFixed(0)}%
-                  </span>
-                </span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-surface-soft">
-                <div
-                  className={`h-full rounded-full transition-all ${budgetProgressColor(
-                    u.status,
-                  )}`}
-                  style={{ width: `${barWidth}%` }}
-                />
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
+function RecentTransactions({ data }: { data: DashboardSummary }) {
+  return (
+    <div className="divide-y divide-hairline-soft">
+      {data.recent_transactions.map((tx) => (
+        <Link key={tx.id} href={`/transactions/${tx.id}`} className="grid gap-2 py-3 hover:bg-surface-doc sm:grid-cols-[1fr_auto] sm:items-center">
+          <div>
+            <p className="text-body-sm font-bold text-ink">{tx.merchant_name ?? "Không có merchant"}</p>
+            <p className="text-caption-sm text-mute">
+              {formatDate(tx.transaction_date)}{tx.category_name ? ` · ${tx.category_name}` : ""}
+            </p>
+          </div>
+          <div className="text-left text-body-sm font-black text-ink sm:text-right">
+            {formatMoney(tx.amount, tx.currency)}
+          </div>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function ActionCard({ href, title, body }: { href: string; title: string; body: string }) {
+  const Icon = href.includes("receipts") ? UploadCloud : href.includes("chat") ? ArrowUpRight : href.includes("insights") ? Sparkles : ReceiptText;
+  return (
+    <Link href={href} className="flex gap-3 rounded-lg border border-hairline-soft bg-surface-doc p-4 transition-colors hover:bg-surface-soft">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-green-soft text-accent-green">
+        <Icon className="h-4.5 w-4.5" aria-hidden />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-body-strong text-ink">{title}</span>
+        <span className="mt-1 block text-caption-sm text-mute">{body}</span>
+      </span>
+      <ChevronRight className="ml-auto mt-1 h-4 w-4 shrink-0 text-stone" aria-hidden />
+    </Link>
   );
 }
