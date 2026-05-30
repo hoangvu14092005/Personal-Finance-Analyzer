@@ -26,8 +26,10 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    # Login accepts the local demo username "admin" in addition to real emails.
+    # Registration remains strict via RegisterRequest.
+    email: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=1, max_length=128)
 
 
 class ProfileResponse(BaseModel):

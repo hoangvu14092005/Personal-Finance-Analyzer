@@ -57,6 +57,11 @@ class Settings(BaseSettings):
 
     request_id_header: str = "X-Request-ID"
 
+    # Demo login: cho phép đăng nhập bằng username ngắn (vd "admin") map sang
+    # email demo. CHỈ dùng cho local review — phải tắt ở staging/prod (validator
+    # bên dưới ép tắt). Bật bằng env ENABLE_DEMO_LOGIN=true.
+    enable_demo_login: bool = False
+
     jwt_secret: str = DEFAULT_JWT_SECRET
     jwt_access_expire_minutes: int = 30
     jwt_refresh_expire_days: int = 7
@@ -101,6 +106,12 @@ class Settings(BaseSettings):
                     "STORAGE_BACKEND must be 's3' in "
                     f"{self.app_env.value} environment "
                     "(local filesystem storage is not supported).",
+                )
+            if self.enable_demo_login:
+                raise ValueError(
+                    "ENABLE_DEMO_LOGIN must be false in "
+                    f"{self.app_env.value} environment "
+                    "(demo username login is local-only).",
                 )
         return self
 

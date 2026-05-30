@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlmodel import Session, select
 
+from app.core.config import get_settings
 from app.core.database import get_session
 from app.core.logging import get_logger
 from app.core.security import clear_auth_cookie, create_access_token, set_auth_cookie
@@ -104,7 +105,15 @@ def login(
     response: Response,
     session: Session = Depends(get_session),
 ) -> AuthResponse:
-    user = session.exec(select(User).where(User.email == payload.email)).first()
+    login_identifier = payload.email.strip()
+    # Demo login (local-only): map username ngắn "admin" sang email demo.
+    # Chỉ bật khi settings.enable_demo_login (ép tắt ở staging/prod qua validator).
+    settings = get_settings()
+    if settings.enable_demo_login and login_identifier.lower() == "admin":
+        lookup_email = "admin@example.com"
+    else:
+        lookup_email = login_identifier
+    user = session.exec(select(User).where(User.email == lookup_email)).first()
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
