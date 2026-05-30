@@ -21,6 +21,7 @@ import calendar
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import Literal
 
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, func, select
@@ -28,6 +29,8 @@ from sqlmodel import Session, col, func, select
 from app.models.entities import Budget, Category, Transaction
 
 WARNING_THRESHOLD = 80.0  # %
+
+BudgetStatus = Literal["safe", "warning", "exceeded"]
 
 
 class BudgetAlreadyExistsError(Exception):
@@ -51,7 +54,7 @@ class BudgetUsage:
     spent_amount: Decimal
     remaining_amount: Decimal
     percent_used: float  # 0..inf (không clamp 100 để UI render "120%").
-    status: str  # "safe" | "warning" | "exceeded"
+    status: BudgetStatus  # "safe" | "warning" | "exceeded"
 
 
 def _parse_period_month(period_month: str) -> tuple[date, date]:
@@ -69,7 +72,7 @@ def _parse_period_month(period_month: str) -> tuple[date, date]:
     return date(year, month, 1), date(year, month, last_day)
 
 
-def _compute_status(percent_used: float) -> str:
+def _compute_status(percent_used: float) -> BudgetStatus:
     if percent_used > 100.0:
         return "exceeded"
     if percent_used >= WARNING_THRESHOLD:

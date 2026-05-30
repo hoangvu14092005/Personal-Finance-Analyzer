@@ -38,7 +38,7 @@ def _require_user_id(current_user: User) -> int:
 
 
 def _insight_response(payload: dict[str, object]) -> InsightResponse:
-    return InsightResponse(**payload)
+    return InsightResponse.model_validate(payload)
 
 
 @router.get("", response_model=InsightListResponse)

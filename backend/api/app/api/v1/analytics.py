@@ -133,7 +133,7 @@ def _usage_response(usage: BudgetUsage) -> BudgetUsageResponse:
 
 
 def _insight_response(payload: dict[str, object]) -> InsightResponse:
-    return InsightResponse(**payload)
+    return InsightResponse.model_validate(payload)
 
 
 @router.get("/overview", response_model=DashboardSummaryResponse)
