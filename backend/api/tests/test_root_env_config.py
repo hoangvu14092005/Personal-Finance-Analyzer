@@ -21,7 +21,7 @@ def test_api_settings_can_load_root_env_file() -> None:
 
     settings = _read_env_file(ROOT_ENV_FILE)
 
-    assert settings["DATABASE_URL"] == "postgresql+psycopg://pfa:pfa@localhost:5433/pfa"
+    assert settings["DATABASE_URL"] == "postgresql+psycopg://pfa:pfa@localhost:5434/pfa"
     assert settings["STORAGE_BACKEND"] == "s3"
     assert settings["OCR_PROVIDER"] == "llm_vision"
     assert settings["CHAT_LLM_BASE_URL"] == "http://localhost:20128/v1"
