@@ -19,6 +19,7 @@ except ImportError:
 
 from pfa_shared.config import CommonSettings  # noqa: E402
 from pfa_shared.logging import get_logger  # noqa: E402
+from sqlmodel import create_engine  # noqa: E402
 from taskiq_redis import ListQueueBroker, RedisAsyncResultBackend  # noqa: E402
 
 settings = CommonSettings.from_env()
@@ -27,4 +28,14 @@ logger.info("Initializing worker broker")
 
 broker = ListQueueBroker(url=settings.redis_url).with_result_backend(
     RedisAsyncResultBackend(redis_url=settings.redis_url),
+)
+
+# Engine dùng chung ở phạm vi process. Worker là long-lived process xử lý nhiều
+# task; tạo `create_engine` trong mỗi task sẽ rò rỉ connection pool. Dùng một
+# engine duy nhất + pool_pre_ping (phát hiện connection chết sau idle) +
+# pool_recycle (recycle sau 30 phút để né server-side idle timeout).
+engine = create_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    pool_recycle=1800,
 )

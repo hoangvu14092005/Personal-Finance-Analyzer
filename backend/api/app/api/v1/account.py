@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session
 
 from app.core.database import get_session
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user_allow_deletion_pending
 from app.models.entities import User
 from app.schemas.account import AccountDeleteRequest, AccountDeleteResponse
 from app.services.audit import record_audit_event
@@ -38,7 +38,7 @@ def _delete_response(user: User, *, message: str) -> AccountDeleteResponse:
 def request_account_deletion(
     payload: AccountDeleteRequest,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_allow_deletion_pending),
 ) -> AccountDeleteResponse:
     user = _require_user(current_user)
     now = datetime.now(tz=UTC)
@@ -69,7 +69,7 @@ def request_account_deletion(
 @router.post("/delete-request/cancel", response_model=AccountDeleteResponse)
 def cancel_account_deletion(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_allow_deletion_pending),
 ) -> AccountDeleteResponse:
     user = _require_user(current_user)
     user.account_deletion_requested_at = None

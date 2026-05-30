@@ -23,10 +23,10 @@ from pfa_shared.storage import (
     StorageService,
     build_storage_service,
 )
-from sqlmodel import Session, create_engine, select
+from sqlmodel import Session, select
 
 from ocr_provider import OCRInvoiceResult, OCRProvider, get_ocr_provider
-from worker_app import broker, settings
+from worker_app import broker, engine, settings
 
 
 def build_ping_response() -> str:
@@ -260,12 +260,12 @@ def run_ocr_for_receipt(
 
 @broker.task
 async def process_ocr_job(receipt_id: int) -> str:
-    """TaskIQ entry point: tạo engine/session/storage rồi delegate.
+    """TaskIQ entry point: tạo session/storage từ engine dùng chung rồi delegate.
 
-    Worker là long-lived process, engine pooled qua SQLModel.
+    Engine là singleton phạm vi process (định nghĩa ở `worker_app`), tái sử dụng
+    qua các task để tránh rò rỉ connection pool.
     Sau OCR READY, chain task `index_receipt_text` để embed OCR text cho RAG.
     """
-    engine = create_engine(settings.database_url)
     storage = build_storage_service(settings)
     provider = get_ocr_provider()
 

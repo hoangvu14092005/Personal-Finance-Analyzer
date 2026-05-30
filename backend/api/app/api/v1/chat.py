@@ -11,6 +11,7 @@ import json
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy import or_
 from sqlmodel import Session, col, delete, select
@@ -213,7 +214,11 @@ async def send_message(
 ) -> StreamingResponse:
     """Gửi message và nhận SSE stream response từ chatbot."""
     user_id = _require_user_id(current_user)
-    conversation = _resolve_conversation(
+    # DB sync resolve conversation -> off event loop (xử lý trước stream).
+    # Known limitation: generator SSE (`run_chat_turn`) vẫn dùng session sync
+    # xuyên suốt stream — chuyển sang AsyncSession nằm ngoài phạm vi fix này.
+    conversation = await run_in_threadpool(
+        _resolve_conversation,
         session,
         user_id=user_id,
         conversation_id=payload.conversation_id,
@@ -270,7 +275,8 @@ async def send_conversation_message(
     session: Session = Depends(get_session),
 ) -> StreamingResponse:
     user_id = _require_user_id(current_user)
-    conversation = _resolve_conversation(
+    conversation = await run_in_threadpool(
+        _resolve_conversation,
         session,
         user_id=user_id,
         conversation_id=conversation_id,

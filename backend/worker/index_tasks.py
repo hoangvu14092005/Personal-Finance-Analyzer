@@ -12,10 +12,10 @@ from __future__ import annotations
 
 from pfa_shared.entities import OcrResult, ReceiptTextChunk, ReceiptUpload
 from pfa_shared.logging import get_logger
-from sqlmodel import Session, create_engine, delete, select
+from sqlmodel import Session, delete, select
 
 from embedding_client import get_embedding_client
-from worker_app import broker, settings
+from worker_app import broker, engine
 
 logger = get_logger("worker.index")
 
@@ -112,8 +112,7 @@ def run_index_receipt_text(
 
 @broker.task
 async def index_receipt_text(receipt_upload_id: int) -> str:
-    """TaskIQ entry: index receipt OCR text."""
-    engine = create_engine(settings.database_url)
+    """TaskIQ entry: index receipt OCR text. Dùng engine chung phạm vi process."""
     client = get_embedding_client()
 
     with Session(engine) as session:

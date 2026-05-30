@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from pfa_shared.enums import ReceiptStatus
 from sqlmodel import Session, select
 
@@ -55,6 +56,25 @@ DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
 
 
+def _persist_uploaded_receipt(session: Session, receipt: ReceiptUpload) -> ReceiptUpload:
+    """Sync DB write cho receipt upload. Chạy off event loop qua run_in_threadpool."""
+    session.add(receipt)
+    session.commit()
+    session.refresh(receipt)
+    return receipt
+
+
+def _mark_queue_unavailable(session: Session, receipt: ReceiptUpload) -> ReceiptUpload:
+    """Rollback fail-soft khi queue down (sync DB write)."""
+    receipt.status = ReceiptStatus.UPLOADED.value
+    receipt.error_code = "queue_unavailable"
+    receipt.error_message = "OCR queue is not available. You can retry later."
+    session.add(receipt)
+    session.commit()
+    session.refresh(receipt)
+    return receipt
+
+
 @router.post("", response_model=ReceiptUploadResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/upload", response_model=ReceiptUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_receipt(
@@ -73,8 +93,11 @@ async def upload_receipt(
     generated_name = f"{uuid4().hex}{extension}"
     storage_key = f"{current_user.id}/{generated_name}"
 
+    # Storage upload là I/O blocking (filesystem/S3) -> chạy off event loop.
     storage = get_storage_service()
-    stored_object = storage.upload_bytes(storage_key, file_content, file.content_type or "")
+    stored_object = await run_in_threadpool(
+        storage.upload_bytes, storage_key, file_content, file.content_type or "",
+    )
 
     # Set PROCESSING TRƯỚC khi enqueue để tránh race condition:
     # nếu set sau enqueue, worker có thể finish (READY) trước khi API kịp ghi
@@ -89,9 +112,8 @@ async def upload_receipt(
         status=ReceiptStatus.PROCESSING.value,
         ocr_status="pending",
     )
-    session.add(receipt)
-    session.commit()
-    session.refresh(receipt)
+    # DB write blocking -> off event loop.
+    receipt = await run_in_threadpool(_persist_uploaded_receipt, session, receipt)
 
     if receipt.id is None:
         raise HTTPException(
@@ -104,14 +126,10 @@ async def upload_receipt(
         # Rollback: queue down -> trả về UPLOADED + error code để frontend
         # có thể retry hoặc fallback sang manual entry. Không chuyển FAILED
         # vì lỗi nằm ở queue, không phải OCR engine.
-        receipt.status = ReceiptStatus.UPLOADED.value
-        receipt.error_code = "queue_unavailable"
-        receipt.error_message = "OCR queue is not available. You can retry later."
-        session.add(receipt)
-        session.commit()
-        session.refresh(receipt)
+        receipt = await run_in_threadpool(_mark_queue_unavailable, session, receipt)
 
-    record_audit_event(
+    await run_in_threadpool(
+        record_audit_event,
         session,
         user_id=current_user.id,
         event="receipt.uploaded",
@@ -263,18 +281,16 @@ async def retry_receipt_ocr(
     if current_user.id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
 
-    receipt = reset_receipt_for_retry(session, receipt_id=receipt_id, user_id=current_user.id)
+    receipt = await run_in_threadpool(
+        reset_receipt_for_retry, session, receipt_id=receipt_id, user_id=current_user.id,
+    )
     if receipt.id is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Missing id")
     enqueued = await enqueue_ocr_job(receipt.id)
     if not enqueued:
-        receipt.status = ReceiptStatus.UPLOADED.value
-        receipt.error_code = "queue_unavailable"
-        receipt.error_message = "OCR queue is not available. You can retry later."
-        session.add(receipt)
-        session.commit()
-        session.refresh(receipt)
-    record_audit_event(
+        receipt = await run_in_threadpool(_mark_queue_unavailable, session, receipt)
+    await run_in_threadpool(
+        record_audit_event,
         session,
         user_id=current_user.id,
         event="receipt.retry_requested",
