@@ -12,7 +12,7 @@ import sqlmodel
 from alembic import op
 
 revision = "f6a7b8c9d0e1"
-down_revision = "e5f6a7b8c9d0"
+down_revision = "a0b1c2d3e4f5"
 branch_labels = None
 depends_on = None
 
