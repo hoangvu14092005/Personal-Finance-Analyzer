@@ -1,0 +1,6 @@
+{
+  "name": "Finance Analyzer",
+  "description": "Ứng dụng phân tích quản lý chi tiêu cá nhân thông minh tích bóc tách hóa đơn OCR và Trợ lý Tài chính AI dùng Gemini API.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

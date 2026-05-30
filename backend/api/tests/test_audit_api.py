@@ -33,16 +33,25 @@ class TestAuditLog:
         )
         assert delete_response.status_code == 200
 
+        # Tài khoản đang pending-delete bị chặn khỏi endpoint protected thường
+        # (chính sách mới). Hủy yêu cầu xóa để user active trở lại rồi đọc audit.
+        cancel_response = client.post("/api/v1/account/delete-request/cancel")
+        assert cancel_response.status_code == 200
+
         response = client.get("/api/v1/audit-log")
 
         assert response.status_code == 200
         items = response.json()["items"]
-        assert len(items) == 1
-        assert items[0]["event"] == "account.delete_requested"
-        assert items[0]["actor_user_id"] == auth_user.id
-        assert items[0]["target_type"] == "account"
-        assert items[0]["target_id"] == str(auth_user.id)
-        assert items[0]["metadata"] == {"reason_provided": "True"}
+        events = [item["event"] for item in items]
+        assert "account.delete_requested" in events
+
+        requested = next(
+            item for item in items if item["event"] == "account.delete_requested"
+        )
+        assert requested["actor_user_id"] == auth_user.id
+        assert requested["target_type"] == "account"
+        assert requested["target_id"] == str(auth_user.id)
+        assert requested["metadata"] == {"reason_provided": "True"}
 
     def test_audit_log_respects_limit(
         self,
