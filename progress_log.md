@@ -2127,3 +2127,181 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
 - Risks / Notes:
   - Settings/Data/Billing vẫn phản ánh backend MVP: checkout/avatar/data export chưa phải provider/file pipeline thật.
   - `/analytics` và `/insights` yêu cầu session; khi chưa login sẽ redirect client-side về login.
+
+### 2026-05-29 16:15 - frontend-ui-review - Finance UI re-alignment and local demo login
+- Goal:
+  - Kéo `frontend/web` trở lại gần `finance-analyzer-ui` sau khi user phản hồi UI mới lệch quá xa về nội dung, chữ và cách trình bày.
+  - Giữ nguyên hướng API/domain mới nhưng làm giao diện dễ review bằng tài khoản demo local.
+- Files changed / added:
+  - frontend/web/components/layout/Nav.tsx
+  - frontend/web/app/layout.tsx
+  - frontend/web/app/globals.css
+  - frontend/web/app/login/page.tsx
+  - frontend/web/app/dashboard/dashboard-client.tsx
+  - frontend/web/app/analytics/analytics-client.tsx
+  - frontend/web/app/transactions/transaction-history-client.tsx
+  - frontend/web/app/receipts/receipts-client.tsx
+  - frontend/web/app/receipts/[id]/review/page.tsx
+  - frontend/web/app/receipts/upload/page.tsx
+  - frontend/web/app/budgets/budgets-client.tsx
+  - frontend/web/app/chat/chat-client.tsx
+  - frontend/web/app/settings/settings-client.tsx
+  - frontend/web/package.json
+  - frontend/web/pnpm-lock.yaml
+  - backend/api/app/schemas/auth.py
+  - backend/api/app/api/v1/auth.py
+  - backend/api/scripts/seed_ui_demo.py
+  - docs/session-handoff-2026-05-29-ui-api-demo.md
+- What was implemented:
+  - Reworked frontend shell toward original `finance-analyzer-ui`:
+    - Sidebar brand `Ví Thông Minh`.
+    - Vietnamese navigation groups and labels.
+    - User summary block and app-style topbar.
+    - Avoided generic SaaS terms like `Command center`, `Source of truth`, `Workflow`, `Control center` in primary UI copy.
+  - Added `lucide-react` and replaced code-like stat badges (`AN`, `TX`, `ST`, `BG`, `OCR`, `RT`) with icons similar to the original UI language.
+  - Re-aligned major screens:
+    - Analytics: Vietnamese headings, category icons, original-style stats/cards.
+    - Transactions: `Sổ Nhật Ký Giao Dịch`, filter/search treatment, receipt indicator and evidence expansion.
+    - Receipts list: retrieval/filter screen for chứng từ, linked transaction state, VAT badge.
+    - OCR review: `Kết quả quét thông tin`, receipt preview, confirm-to-transaction form.
+    - Budgets: `Quản lý ngân sách`, stat cards, progress indicators and status icons.
+    - Chat: `Trợ lý tài chính (AI)` with suggestion chips and app-style input area.
+    - Settings: Vietnamese operational labels, icons, settings/billing/security/audit surfaces.
+  - Added local demo login support for UI review:
+    - Login form accepts username/email text.
+    - Backend login accepts short local username/password for login only.
+    - Username `admin` maps to `admin@example.com`.
+    - Register still keeps strict email + strong-password validation.
+  - Added `backend/api/scripts/seed_ui_demo.py` to create/update `admin@example.com` password `1` and seed demo data:
+    - categories
+    - transactions
+    - one receipt upload
+    - OCR result
+    - receipt line items
+    - budgets
+    - insight
+  - Created detailed handoff doc at `docs/session-handoff-2026-05-29-ui-api-demo.md` with ports, login, caveats, restart commands and next steps.
+  - Removed `next/font/google` dependency from `frontend/web/app/layout.tsx` and switched CSS font variables to local/system fallbacks to avoid network-blocked Google Fonts during local dev.
+- Runtime/demo state:
+  - Frontend review URL: `http://127.0.0.1:3005`.
+  - Demo backend URL: `http://127.0.0.1:8010`.
+  - Demo login:
+    - username: `admin`
+    - password: `1`
+  - Backend demo uses SQLite:
+    - `backend/api/.tmp/pfa-ui-demo.db`
+  - `localhost:8000` was left alone because it was occupied by another `fastapi` container and returned broken/closed connections.
+  - Existing Postgres on `5433` rejected `.env` credentials `pfa/pfa`, so SQLite demo was used for fast UI review instead of infra debugging.
+- Validation:
+  - Before the final demo-login/font edits:
+    - `corepack pnpm build`: passed.
+    - `.\node_modules\.bin\playwright.cmd test`: 28 passed.
+  - After demo-login/font/cache fix:
+    - `GET /login`: 200.
+    - `GET /dashboard`: 200.
+    - `GET /receipts/upload`: 200.
+    - `GET /budgets`: 200.
+    - `POST /api/v1/auth/login` with `admin / 1`: 200.
+  - Full frontend build/test was not rerun after final local demo-auth and font fallback changes.
+- Bugs fixed:
+  - `Internal Server Error` on `/login?next=/dashboard` caused by corrupted `frontend/web/.next` dev cache and missing manifest files.
+  - Fixed by stopping port `3005`, deleting `.next`, removing `next/font/google`, and restarting `3005` with `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8010`.
+- Pending / Next:
+  - User should visually review all screens through `http://127.0.0.1:3005` after logging in with `admin / 1`.
+  - Fix any remaining screens that still drift from `finance-analyzer-ui`.
+  - After visual approval, rerun full validation:
+    - `cd frontend/web`
+    - `corepack pnpm build`
+    - `.\node_modules\.bin\playwright.cmd test`
+  - Decide whether demo login should be removed or gated behind an explicit local-dev flag before production hardening.
+  - Later task: RAG/SQL assistant routing remains intentionally deferred per user instruction.
+- Risks / Notes:
+  - Demo login `admin / 1` is local review scaffolding, not production auth.
+  - SQLite demo DB is not the production source of truth.
+  - If `.next` corrupts again, repeat the documented cache removal/restart flow.
+  - Avoid creating extra frontend ports; user asked to keep it simple and stay on `3005`.
+
+### 2026-05-29 18:00 - core-stability+ui - Backend stability fixes + UI tinh thần cleanup + demo-login gating
+
+- Goal:
+  - Sửa 5 bug backend lõi (High Priority) từ đợt review kiến trúc.
+  - Dọn các điểm UI lệch "tinh thần" finance-analyzer-ui ở mức code.
+  - Gate demo login (admin/1) thành dev-only bằng flag.
+  - Làm rõ đường chạy Postgres thật (không phụ thuộc SQLite demo).
+- Files changed:
+  - backend/api/app/main.py
+  - backend/api/app/dependencies/auth.py
+  - backend/api/app/api/v1/account.py
+  - backend/api/app/api/v1/receipts.py
+  - backend/api/app/api/v1/chat.py
+  - backend/api/app/api/v1/auth.py
+  - backend/api/app/core/config.py
+  - backend/worker/worker_app.py
+  - backend/worker/tasks.py
+  - backend/worker/index_tasks.py
+  - backend/api/README.md
+  - .env.example
+  - backend/api/tests/test_schema_parity.py (new)
+  - backend/api/tests/test_exception_handler_cors.py (new)
+  - backend/api/tests/test_get_current_user.py (new)
+  - backend/worker/tests/test_worker_engine_reuse.py (new)
+  - frontend/web/app/layout.tsx
+  - frontend/web/components/layout/Nav.tsx
+  - frontend/web/app/insights/insights-client.tsx
+  - frontend/web/app/dashboard/dashboard-client.tsx
+  - frontend/web/app/transactions/transaction-history-client.tsx
+- What was implemented:
+  - Bug 1 (schema drift): Xóa hẳn `_ensure_tables()` + raw DDL trong main.py; Alembic là source of truth duy nhất. README cảnh báo phải `alembic upgrade head` trên DB mới.
+  - Bug 3 (CORS 500): `global_exception_handler` chỉ reflect Origin khi nằm trong `parsed_cors_origins` (+ Vary: Origin), giữ body/status 500.
+  - Bug 4 (auth state): `get_current_user` thêm check `type=="access"` + `is_active` + chặn tài khoản pending-delete (401). Thêm `get_current_user_allow_deletion_pending` áp cho request/cancel account deletion để không kẹt grace period.
+  - Bug 5 (worker engine leak): engine module-level dùng chung ở worker_app.py (pool_pre_ping=True, pool_recycle=1800); tasks.py + index_tasks.py dùng lại, bỏ create_engine nội bộ. Giữ nguyên chữ ký run_ocr_for_receipt/run_index_receipt_text.
+  - Bug 2 (sync DB trong async handler): bọc storage upload + DB write + audit của upload_receipt/retry_receipt_ocr bằng run_in_threadpool; chat bọc _resolve_conversation; ghi nhận known-limitation cho SSE generator (chuyển AsyncSession ngoài phạm vi).
+  - UI cleanup: bỏ chữ SaaS trong layout header (workspace controls / Local synced) → "Quản lý chi tiêu thông minh"; bỏ footer "Real AI / v2.1" và 2 nút auth mobile trong Nav; InsightStat đổi badge chữ "IN" → icon; Nav + dashboard hiển thị tên user thật từ getMe() thay hard-code "Người dùng PFA"; fix FormEvent deprecated.
+  - Demo login gating: thêm settings.enable_demo_login (env ENABLE_DEMO_LOGIN, default false); validator ép tắt ở staging/prod; auth login chỉ map admin→admin@example.com khi cờ bật. Thêm vào .env.example.
+  - Runbook: README backend thêm mục "Run against real Postgres" + xử lý lệch credential (volume cũ) + ghi chú demo login.
+- Validation:
+  - getDiagnostics sạch trên toàn bộ file backend + frontend đã sửa (không lỗi import/type/cú pháp).
+  - CHƯA chạy được pytest/ruff/mypy/pnpm build/playwright do môi trường shell local lỗi (cmd.exe nuốt lệnh; `uv run` bị file-lock trên sqlalchemy .pyd; venv runtime thiếu pytest dev-deps). Cần verify thủ công.
+- Pending / Next:
+  - Chạy verify thủ công: `cd backend/api && python -m uv run --all-groups pytest -q`; `cd backend/worker && python -m uv run --all-groups pytest -q`; `cd frontend/web && corepack pnpm build && .\node_modules\.bin\playwright.cmd test`.
+  - Nếu test đỏ do thay đổi auth (is_active/type/deletion) ở các test cũ dùng token/usr seed → cập nhật fixture cho khớp.
+  - Chuẩn hóa hệ component dùng chung (DisplayLg + 1 StatCard/Card) — đã đề xuất, chưa làm (phạm vi rộng).
+  - RAG/SQL assistant routing — làm sau, cần spec riêng.
+- Risks / Notes:
+  - Bug 1 đổi hành vi khởi động: mọi DB mới phải migrate trước khi start (kể cả SQLite demo qua create_db_and_tables hoặc Postgres qua alembic).
+  - Bug 4 có thể làm một số test auth cũ đỏ nếu chúng seed user thiếu is_active hoặc dùng token không có type=access — cần rà lại khi chạy được test.
+  - Bug 2 chỉ giảm thiểu blocking ở điểm tách được; SSE chat vẫn giữ session sync trong stream (known limitation).
+
+### 2026-05-30 04:10 - real-stack-bringup - Dựng full stack Postgres thật + vá schema drift Alembic
+
+- Goal:
+  - Verify thật toàn bộ: build frontend, dựng Postgres/Redis/MinIO, migrate, seed, chạy API thật, smoke test E2E HTTP.
+  - Bỏ phụ thuộc SQLite demo; đưa về Postgres thật theo runbook.
+- Files changed:
+  - infra/docker/docker-compose.yml (Postgres port -> ${POSTGRES_HOST_PORT:-5434})
+  - .env (PORT=8001, DATABASE_URL ->5434, CORS/NEXT_PUBLIC_API_BASE_URL ->8001, POSTGRES_HOST_PORT=5434)
+  - backend/api/alembic/versions/a0b1c2d3e4f5_create_invoices_tables.py (MỚI)
+  - backend/api/alembic/versions/b7c8d9e0f1a2_add_merchants_updated_at.py (MỚI)
+  - backend/api/alembic/versions/f6a7b8c9d0e1_receipt_retrieval_and_confirm_flow.py (down_revision -> a0b1c2d3e4f5)
+  - backend/api/tests/test_root_env_config.py (assert DATABASE_URL port 5434)
+- What was implemented:
+  - Frontend: pnpm lint pass; next build pass (18/18 route, exit 0).
+  - Phát hiện port 5433 (Postgres) và 8000 (API) bị dự án khác chiếm (odoo_hrm_dwh, rag-fastapi-chatbot). Đổi PFA sang 5434/8001 để chạy song song, không đụng dự án khác. Đây cũng là gốc "lệch credential" trong log cũ: 5433 thực ra là DB Odoo, không phải DB PFA.
+  - PHÁT HIỆN 2 BUG SCHEMA DRIFT THẬT (hệ quả của Bug 1 — raw DDL che lấp lỗ hổng Alembic):
+    1. Chuỗi Alembic THIẾU migration tạo bảng invoices + invoice_line_items (trước đây chỉ tạo bởi _ensure_tables() raw DDL). f6a7b8c9d0e1 (ALTER invoices ADD transaction_id) fail trên DB sạch. Đã thêm migration a0b1c2d3e4f5 tạo 2 bảng, chèn trước f6a7b8c9d0e1.
+    2. Bảng merchants thiếu cột updated_at (entity có, migration e5f6a7b8c9d0 không tạo). Đã thêm migration b7c8d9e0f1a2 (nối sau head thật f2a3b4c5d6e7 — lưu ý f6a7b8c9d0e1 là branchpoint).
+  - Reset volume Postgres cũ (drift) -> DB sạch -> alembic upgrade head THÀNH CÔNG (21 bảng, lần đầu schema dựng hoàn toàn từ Alembic không cần raw DDL).
+  - Seed categories + seed_ui_demo OK trên Postgres thật.
+  - API chạy thật trên :8001. Smoke HTTP: /health 200; login admin/1 -> 200 (CHỈ khi ENABLE_DEMO_LOGIN=true — gating xác nhận hoạt động); /auth/me 200; /transactions 200 (data thật); /analytics/overview 200.
+- Validation:
+  - Frontend: pnpm lint pass, next build exit 0.
+  - alembic upgrade head: RC 0 trên DB sạch.
+  - API full pytest: 281 pass (sau khi cập nhật test_root_env_config port 5434).
+  - Smoke HTTP end-to-end qua API thật: tất cả endpoint chính trả 200.
+- Pending / Next:
+  - Playwright e2e: cần dev server :3100 + API :8001; chưa chạy trong phiên này.
+  - Cân nhân tạo migration hợp nhất 2 head (a7b8c9...->f2a3b4 và nhánh f6a7...) nếu muốn lịch sử tuyến tính hơn — hiện b7c8d9e0f1a2 đã hợp về 1 head.
+- Risks / Notes:
+  - ENABLE_DEMO_LOGIN đã trả về false trong .env sau khi test.
+  - Postgres dùng port 5434, API 8001 (khác mặc định) để tránh xung đột dự án khác trên máy. Nếu chạy máy khác có thể đổi lại 5433/8000.
+  - 2 migration mới có guard idempotent (_has_table/_has_column) nên an toàn trên cả DB cũ lẫn DB sạch.
