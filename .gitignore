@@ -70,3 +70,15 @@ dist/
 # -----------------------------
 infra/**/.data/
 infra/**/data/
+
+# -----------------------------
+# pnpm content-addressable store (cache, never commit)
+# -----------------------------
+.pnpm-store/
+
+# -----------------------------
+# Local data / artifacts
+# -----------------------------
+backend/api/data/
+frontend/web/ui-review-screenshots/
+out/
