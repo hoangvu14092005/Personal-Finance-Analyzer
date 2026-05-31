@@ -40,6 +40,24 @@ function formatRange(insight: Insight): string {
   return `${insight.range_start} → ${insight.range_end}`;
 }
 
+type InsightAction = { type?: string; label?: string; params?: Record<string, unknown> };
+
+function actionHref(action: InsightAction): string | null {
+  const params = action.params ?? {};
+  const categoryId = params.category_id;
+  const query = typeof categoryId === "number" ? `?category_id=${categoryId}` : "";
+  switch (action.type) {
+    case "open_transactions":
+      return `/transactions${query}`;
+    case "open_budgets":
+      return "/budgets";
+    case "open_analytics":
+      return "/analytics";
+    default:
+      return null;
+  }
+}
+
 export default function InsightsClient() {
   const router = useRouter();
   const [authReady, setAuthReady] = useState(false);
@@ -195,6 +213,24 @@ export default function InsightsClient() {
                       <p key={idx}>{Object.entries(evidence).map(([key, value]) => `${key}: ${String(value)}`).join(" · ")}</p>
                     ))}
                   </div>
+                </div>
+              )}
+              {insight.actions.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {(insight.actions as InsightAction[]).map((action, idx) => {
+                    const href = actionHref(action);
+                    if (!href || !action.label) return null;
+                    return (
+                      <Button
+                        key={`${action.type}-${idx}`}
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => router.push(href)}
+                      >
+                        {action.label}
+                      </Button>
+                    );
+                  })}
                 </div>
               )}
               <div className="flex flex-wrap justify-between gap-2 border-t border-hairline-soft pt-3">

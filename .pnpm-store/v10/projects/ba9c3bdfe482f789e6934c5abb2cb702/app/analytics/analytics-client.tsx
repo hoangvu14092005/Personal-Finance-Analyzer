@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  ArrowDownRight,
   ArrowUpRight,
   Calendar,
   Car,
@@ -13,28 +14,52 @@ import {
   Gamepad2,
   HeartPulse,
   PieChart,
+  Receipt,
   ShoppingBag,
   Sparkles,
   Store,
   TrendingDown,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 
 import { getMe } from "@/lib/auth-api";
 import {
   AnalyticsAnomaliesResponse,
+  AnalyticsCalendarResponse,
+  AnalyticsDiagnosticsResponse,
+  AnalyticsForecastResponse,
   AnalyticsMerchantsResponse,
+  AnalyticsProductsResponse,
+  AnalyticsRecurringResponse,
+  AnalyticsTaxResponse,
   AnalyticsTrendsResponse,
   getAnalyticsAnomalies,
+  getAnalyticsCalendar,
   getAnalyticsCategories,
+  getAnalyticsDiagnostics,
+  getAnalyticsForecast,
   getAnalyticsInsightFeed,
   getAnalyticsMerchants,
+  getAnalyticsProducts,
+  getAnalyticsRecurring,
+  getAnalyticsTax,
   getAnalyticsTrends,
 } from "@/lib/analytics-api";
 import type { CategoryBreakdown, RangePreset } from "@/lib/dashboard-api";
 import { RANGE_LABELS, RANGE_PRESETS } from "@/lib/dashboard-api";
 import type { Insight } from "@/lib/insights-api";
-import { Badge, Button, Card } from "@/components/ui";
+import { Badge, Button, Card, PillTab } from "@/components/ui";
+
+const TABS = [
+  { key: "overview", label: "Tổng quan" },
+  { key: "categories", label: "Danh mục" },
+  { key: "cashflow", label: "Dòng tiền" },
+  { key: "documents", label: "Chứng từ & VAT" },
+  { key: "advice", label: "Gợi ý" },
+] as const;
+
+type TabKey = (typeof TABS)[number]["key"];
 
 type AnalyticsState = {
   categories: CategoryBreakdown[];
@@ -42,6 +67,12 @@ type AnalyticsState = {
   merchants: AnalyticsMerchantsResponse;
   anomalies: AnalyticsAnomaliesResponse;
   insights: Insight[];
+  products: AnalyticsProductsResponse;
+  tax: AnalyticsTaxResponse;
+  diagnostics: AnalyticsDiagnosticsResponse;
+  forecast: AnalyticsForecastResponse;
+  calendar: AnalyticsCalendarResponse;
+  recurring: AnalyticsRecurringResponse;
 };
 
 function formatMoney(value: string): string {
@@ -78,6 +109,7 @@ export default function AnalyticsClient() {
   const router = useRouter();
   const [authReady, setAuthReady] = useState(false);
   const [range, setRange] = useState<RangePreset>("30d");
+  const [tab, setTab] = useState<TabKey>("overview");
   const [data, setData] = useState<AnalyticsState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -101,12 +133,18 @@ export default function AnalyticsClient() {
     setLoading(true);
     setError(null);
     try {
-      const [categories, trends, merchants, anomalies, insightFeed] = await Promise.all([
+      const [categories, trends, merchants, anomalies, insightFeed, products, tax, diagnostics, forecast, calendar, recurring] = await Promise.all([
         getAnalyticsCategories({ range, limit: 8 }),
         getAnalyticsTrends({ range, group_by: range === "30d" ? "week" : "day" }),
         getAnalyticsMerchants({ range, limit: 8 }),
         getAnalyticsAnomalies({ range, limit: 6 }),
         getAnalyticsInsightFeed({ range, limit: 4, auto_generate: true }),
+        getAnalyticsProducts({ range, limit: 8 }),
+        getAnalyticsTax({ range, sellers_limit: 6 }),
+        getAnalyticsDiagnostics({ range, top_drivers: 5 }),
+        getAnalyticsForecast(),
+        getAnalyticsCalendar({ range }),
+        getAnalyticsRecurring({ lookback_months: 6 }),
       ]);
       setData({
         categories: categories.items,
@@ -114,6 +152,12 @@ export default function AnalyticsClient() {
         merchants,
         anomalies,
         insights: insightFeed.insights,
+        products,
+        tax,
+        diagnostics,
+        forecast,
+        calendar,
+        recurring,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Không thể tải dữ liệu phân tích");
@@ -130,16 +174,56 @@ export default function AnalyticsClient() {
   const merchantMax = useMemo(() => maxAmount(data?.merchants.items.map((m) => m.total_amount) ?? []), [data]);
   const stats = useMemo(() => {
     if (!data) {
-      return { spend: 0, transactions: 0, topCategory: "-", topMerchant: "-", anomalies: 0 };
+      return {
+        spend: 0, transactions: 0, topCategory: "-", topCategoryPct: 0,
+        topMerchant: "-", anomalies: 0,
+        budgetPercent: null as number | null, budgetStatus: "-" as string,
+      };
     }
+    const spend = sumAmounts(data.trends.points.map((point) => point.amount));
+    // Mức dùng ngân sách: từ forecast budgets (spent / budget tổng).
+    const totalBudget = data.forecast.budgets.reduce((s, b) => s + (Number(b.budget_amount) || 0), 0);
+    const totalSpentBudgeted = data.forecast.budgets.reduce((s, b) => s + (Number(b.spent_so_far) || 0), 0);
+    const budgetPercent = totalBudget > 0 ? Math.round((totalSpentBudgeted / totalBudget) * 100) : null;
+    const exceeded = data.forecast.budgets.some((b) => b.status === "exceeded");
+    const willExceed = data.forecast.budgets.some((b) => b.status === "will_exceed");
+    const budgetStatus = budgetPercent === null
+      ? "Chưa đặt ngân sách"
+      : exceeded ? "Đã vượt ngân sách"
+      : willExceed ? "Dự báo vượt"
+      : budgetPercent >= 80 ? "Cần chú ý"
+      : "Đúng kế hoạch";
     return {
-      spend: sumAmounts(data.trends.points.map((point) => point.amount)),
+      spend,
       transactions: data.trends.points.reduce((sum, point) => sum + point.transaction_count, 0),
       topCategory: data.categories[0]?.name ?? "-",
+      topCategoryPct: data.categories[0]?.percentage ?? 0,
       topMerchant: data.merchants.items[0]?.merchant_name ?? "-",
       anomalies: data.anomalies.anomalies.length,
+      budgetPercent,
+      budgetStatus,
     };
   }, [data]);
+
+  // Insight summary banner — ngôn ngữ tự nhiên, ghép từ số liệu deterministic.
+  const summaryText = useMemo(() => {
+    if (!data) return "";
+    const parts: string[] = [];
+    parts.push(`Trong kỳ này bạn đã chi ${formatMoney(String(stats.spend))} với ${stats.transactions} giao dịch.`);
+    if (stats.topCategory !== "-") {
+      parts.push(`${stats.topCategory} là nhóm chi lớn nhất, chiếm ${stats.topCategoryPct.toFixed(1)}%.`);
+    }
+    if (stats.anomalies > 0) {
+      parts.push(`Có ${stats.anomalies} giao dịch cần kiểm tra.`);
+    }
+    const nearBudget = data.forecast.budgets
+      .filter((b) => b.status === "will_exceed" || b.status === "exceeded" || b.projected_percent >= 80)
+      .map((b) => b.category_name);
+    if (nearBudget.length > 0) {
+      parts.push(`Nhóm gần/đã chạm ngân sách: ${nearBudget.slice(0, 3).join(", ")}.`);
+    }
+    return parts.join(" ");
+  }, [data, stats]);
 
   if (!authReady) {
     return <p className="text-body-sm text-mute">Đang kiểm tra phiên đăng nhập...</p>;
@@ -252,9 +336,21 @@ export default function AnalyticsClient() {
                 {data.categories.length === 0 && <p className="text-body-sm text-mute">Chưa có dữ liệu danh mục.</p>}
               </div>
             </Card>
+
+            <DiagnosticsCard data={data.diagnostics} />
+
+            <CalendarHeatmapCard data={data.calendar} />
+
+            <ProductsCard data={data.products} />
+
+            <TaxCard data={data.tax} />
           </section>
 
           <aside className="lg:col-span-4 space-y-4">
+            <ForecastCard data={data.forecast} />
+
+            <RecurringCard data={data.recurring} />
+
             <Card className="space-y-4 border-hairline-soft bg-surface-card">
               <h2 className="text-heading-sm-mixed text-ink">Cửa hàng nổi bật</h2>
               <div className="space-y-3">
@@ -336,5 +432,355 @@ function AnalyticsStat({ icon: Icon, label, value, detail, tone }: { icon: Lucid
       </div>
       <p className="mt-2 text-caption-sm text-mute">{detail}</p>
     </article>
+  );
+}
+
+const FORECAST_STATUS: Record<string, { label: string; tone: "green" | "red" | "purple" | "blue" }> = {
+  on_track: { label: "Đúng kế hoạch", tone: "green" },
+  warning: { label: "Cần chú ý", tone: "purple" },
+  will_exceed: { label: "Dự báo vượt", tone: "red" },
+  exceeded: { label: "Đã vượt", tone: "red" },
+};
+
+function ForecastCard({ data }: { data: import("@/lib/analytics-api").AnalyticsForecastResponse }) {
+  const { month, budgets } = data;
+  const spent = Number(month.spent_so_far) || 0;
+  const projected = Number(month.projected_total) || 0;
+  const progress = projected > 0 ? Math.min(100, (spent / projected) * 100) : 0;
+  return (
+    <Card className="space-y-4 border-hairline-soft bg-surface-card">
+      <div>
+        <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
+          <TrendingUp className="h-4 w-4 text-mute" aria-hidden />
+          Dự báo cuối tháng
+        </h2>
+        <p className="text-caption-sm text-mute">
+          Tháng {month.period_month} · {month.days_elapsed}/{month.days_in_month} ngày
+        </p>
+      </div>
+      {spent === 0 ? (
+        <p className="text-body-sm text-mute">Chưa có giao dịch nào trong tháng này để dự báo.</p>
+      ) : (
+        <>
+          <div className="space-y-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-caption-sm text-mute">Đã chi</span>
+              <span className="text-body-strong text-ink">{formatMoney(month.spent_so_far)}</span>
+            </div>
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-caption-sm text-mute">Dự kiến cả tháng</span>
+              <span className="text-body-strong text-accent-blue">{formatMoney(month.projected_total)}</span>
+            </div>
+            <div className="mt-2 h-2 rounded-full bg-surface-soft">
+              <div className="h-full rounded-full bg-accent-blue" style={{ width: `${progress}%` }} />
+            </div>
+            <p className="text-caption-sm text-mute">Nhịp chi ~{formatMoney(month.daily_run_rate)}/ngày</p>
+          </div>
+          {budgets.length > 0 && (
+            <div className="space-y-2 border-t border-hairline-soft pt-3">
+              <p className="text-caption-xs font-bold uppercase tracking-wide text-mute">Ngân sách dự báo</p>
+              {budgets.map((b) => {
+                const status = FORECAST_STATUS[b.status] ?? FORECAST_STATUS.on_track;
+                return (
+                  <div key={b.category_id} className="space-y-1">
+                    <div className="flex justify-between gap-2 text-caption-sm">
+                      <span className="truncate text-ink">{b.category_name}</span>
+                      <Badge tone={status.tone}>{status.label}</Badge>
+                    </div>
+                    <div className="flex justify-between gap-2 text-caption-sm text-mute">
+                      <span>Dự kiến {formatMoney(b.projected_spend)} / {formatMoney(b.budget_amount)}</span>
+                      <span>{b.projected_percent.toFixed(0)}%</span>
+                    </div>
+                    {b.projected_exceed_date && (
+                      <p className="text-caption-sm text-accent-red">Dự kiến chạm hạn mức ngày {formatDate(b.projected_exceed_date)}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+function DiagnosticsCard({ data }: { data: import("@/lib/analytics-api").AnalyticsDiagnosticsResponse }) {
+  const delta = Number(data.delta_amount) || 0;
+  const up = delta > 0;
+  const hasPrev = Number(data.previous_total) > 0;
+  return (
+    <Card className="space-y-4 border-hairline-soft bg-surface-card">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
+          <Activity className="h-4 w-4 text-mute" aria-hidden />
+          Vì sao chi tiêu thay đổi
+        </h2>
+        {hasPrev && (
+          <span className={`flex items-center gap-1 text-body-sm font-semibold ${up ? "text-accent-red" : "text-accent-green"}`}>
+            {up ? <ArrowUpRight className="h-4 w-4" aria-hidden /> : <ArrowDownRight className="h-4 w-4" aria-hidden />}
+            {formatMoney(String(Math.abs(delta)))}
+            {data.delta_percent !== null && ` (${Math.abs(data.delta_percent).toFixed(0)}%)`}
+          </span>
+        )}
+      </div>
+      {!hasPrev ? (
+        <p className="text-body-sm text-mute">Chưa đủ dữ liệu kỳ trước để so sánh.</p>
+      ) : data.drivers.length === 0 ? (
+        <p className="text-body-sm text-mute">Không có thay đổi đáng kể giữa hai kỳ.</p>
+      ) : (
+        <div className="space-y-3">
+          {data.drivers.map((driver) => {
+            const dUp = driver.direction === "increase";
+            return (
+              <div key={`${driver.category_id}-${driver.category_name}`} className="rounded-lg border border-hairline-soft bg-surface-doc p-3">
+                <div className="flex justify-between gap-3 text-body-sm">
+                  <span className="font-semibold text-ink">{driver.category_name}</span>
+                  <span className={`flex items-center gap-1 font-semibold ${dUp ? "text-accent-red" : "text-accent-green"}`}>
+                    {dUp ? "+" : "−"}{formatMoney(String(Math.abs(Number(driver.delta_amount) || 0)))}
+                  </span>
+                </div>
+                {driver.top_merchants.length > 0 && (
+                  <p className="mt-1 text-caption-sm text-mute">
+                    {driver.top_merchants.slice(0, 2).map((m) => m.merchant_name).join(", ")}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ProductsCard({ data }: { data: import("@/lib/analytics-api").AnalyticsProductsResponse }) {
+  return (
+    <Card className="space-y-4 border-hairline-soft bg-surface-card">
+      <div>
+        <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
+          <ShoppingBag className="h-4 w-4 text-mute" aria-hidden />
+          Top sản phẩm / món
+        </h2>
+        <p className="text-caption-sm text-mute">Dựa trên hóa đơn OCR đã xác nhận</p>
+      </div>
+      {data.items.length === 0 ? (
+        <p className="text-body-sm text-mute">Chưa có dữ liệu sản phẩm. Hãy tải hóa đơn lên để bóc tách chi tiết món.</p>
+      ) : (
+        <div className="space-y-2">
+          {data.items.map((p) => (
+            <div key={p.item_name} className="space-y-1 rounded-lg border border-hairline-soft bg-surface-doc p-3">
+              <div className="flex justify-between gap-3 text-body-sm">
+                <span className="min-w-0 truncate font-medium text-ink">{p.item_name}</span>
+                <span className="shrink-0 text-mute">{formatMoney(p.total_amount)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 text-caption-sm text-mute">
+                <span>SL {Number(p.total_quantity).toLocaleString("vi-VN", { maximumFractionDigits: 2 })} · {p.line_count} dòng</span>
+                <span>{p.percentage.toFixed(0)}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-surface-soft">
+                <div className="h-full rounded-full bg-accent-green" style={{ width: `${Math.min(100, p.percentage)}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function TaxCard({ data }: { data: import("@/lib/analytics-api").AnalyticsTaxResponse }) {
+  if (data.invoice_count === 0) {
+    return (
+      <Card className="space-y-4 border-hairline-soft bg-surface-card">
+        <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
+          <Receipt className="h-4 w-4 text-mute" aria-hidden />
+          VAT &amp; người bán
+        </h2>
+        <p className="text-body-sm text-mute">Chưa có hóa đơn VAT trong kỳ này.</p>
+      </Card>
+    );
+  }
+  return (
+    <Card className="space-y-4 border-hairline-soft bg-surface-card">
+      <div>
+        <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
+          <Receipt className="h-4 w-4 text-mute" aria-hidden />
+          VAT &amp; người bán
+        </h2>
+        <p className="text-caption-sm text-mute">{data.invoice_count} hóa đơn · thuế suất hiệu dụng {data.effective_tax_rate.toFixed(1)}%</p>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <TaxStat label="Trước thuế" value={formatMoney(data.subtotal_before_tax)} />
+        <TaxStat label="Thuế VAT" value={formatMoney(data.total_tax)} />
+        <TaxStat label="Tổng cộng" value={formatMoney(data.grand_total)} />
+      </div>
+      {data.top_sellers.length > 0 && (
+        <div className="space-y-2 border-t border-hairline-soft pt-3">
+          <p className="text-caption-xs font-bold uppercase tracking-wide text-mute">Người bán nổi bật</p>
+          {data.top_sellers.map((s) => (
+            <div key={`${s.seller_name}-${s.seller_tax_id ?? ""}`} className="flex justify-between gap-3 text-caption-sm">
+              <span className="min-w-0 truncate text-ink">
+                {s.seller_name}
+                {s.seller_tax_id && <span className="ml-1 text-mute">· MST {s.seller_tax_id}</span>}
+              </span>
+              <span className="shrink-0 text-mute">{formatMoney(s.total_amount)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function TaxStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-hairline-soft bg-surface-doc p-3">
+      <p className="text-caption-xs font-bold uppercase tracking-wide text-mute">{label}</p>
+      <p className="mt-1 truncate text-body-strong text-ink" title={value}>{value}</p>
+    </div>
+  );
+}
+
+const HEAT_COLORS = [
+  "bg-surface-soft",        // 0 - no spend
+  "bg-accent-green-soft",   // 1 - low
+  "bg-accent-blue-soft",    // 2 - medium
+  "bg-accent-blue",         // 3 - high
+  "bg-accent-red",          // 4 - unusual
+];
+
+const WEEKDAY_LABELS = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
+
+function CalendarHeatmapCard({ data }: { data: import("@/lib/analytics-api").AnalyticsCalendarResponse }) {
+  // Map ngày -> dữ liệu để tra cứu nhanh.
+  const byDate = new Map(data.days.map((d) => [d.date, d]));
+  const total = data.days.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+
+  if (data.days.length === 0) {
+    return (
+      <Card className="space-y-4 border-hairline-soft bg-surface-card">
+        <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
+          <Calendar className="h-4 w-4 text-mute" aria-hidden />
+          Lịch nhiệt chi tiêu
+        </h2>
+        <p className="text-body-sm text-mute">Chưa có giao dịch trong kỳ này.</p>
+      </Card>
+    );
+  }
+
+  // Dựng các cột tuần từ start -> end. Mỗi cột 7 ô (T2..CN).
+  const start = new Date(`${data.range.start}T00:00:00`);
+  const end = new Date(`${data.range.end}T00:00:00`);
+  // Lùi start về thứ Hai của tuần chứa nó.
+  const startMonday = new Date(start);
+  const startDow = (start.getDay() + 6) % 7; // 0=Mon..6=Sun
+  startMonday.setDate(start.getDate() - startDow);
+
+  const weeks: Array<Array<{ iso: string; inRange: boolean } | null>> = [];
+  const cursor = new Date(startMonday);
+  while (cursor <= end) {
+    const week: Array<{ iso: string; inRange: boolean } | null> = [];
+    for (let i = 0; i < 7; i += 1) {
+      const iso = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
+      const inRange = cursor >= start && cursor <= end;
+      week.push({ iso, inRange });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    weeks.push(week);
+  }
+
+  return (
+    <Card className="space-y-4 border-hairline-soft bg-surface-card">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
+            <Calendar className="h-4 w-4 text-mute" aria-hidden />
+            Lịch nhiệt chi tiêu
+          </h2>
+          <p className="text-caption-sm text-mute">Tổng {formatMoney(String(total))} trong kỳ</p>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <div className="flex gap-2">
+          <div className="flex flex-col justify-between py-0.5 pr-1 text-[10px] text-mute">
+            {WEEKDAY_LABELS.map((label) => (
+              <span key={label} className="h-3.5 leading-3.5">{label}</span>
+            ))}
+          </div>
+          <div className="flex gap-1">
+            {weeks.map((week, wi) => (
+              <div key={wi} className="flex flex-col gap-1">
+                {week.map((cell, di) => {
+                  if (!cell || !cell.inRange) {
+                    return <div key={di} className="h-3.5 w-3.5 rounded-sm bg-transparent" />;
+                  }
+                  const day = byDate.get(cell.iso);
+                  const intensity = day ? day.intensity : 0;
+                  const color = HEAT_COLORS[intensity] ?? HEAT_COLORS[0];
+                  const title = day
+                    ? `${formatDate(cell.iso)}: ${formatMoney(day.amount)} (${day.transaction_count} giao dịch)${day.is_unusual ? " · bất thường" : ""}`
+                    : `${formatDate(cell.iso)}: không chi`;
+                  return <div key={di} className={`h-3.5 w-3.5 rounded-sm ${color}`} title={title} />;
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 text-[10px] text-mute">
+        <span>Ít</span>
+        {HEAT_COLORS.map((c) => (
+          <span key={c} className={`h-3 w-3 rounded-sm ${c}`} />
+        ))}
+        <span>Nhiều</span>
+      </div>
+    </Card>
+  );
+}
+
+function RecurringCard({ data }: { data: import("@/lib/analytics-api").AnalyticsRecurringResponse }) {
+  const fixed = Number(data.fixed_monthly_estimate) || 0;
+  const variable = Number(data.variable_last_month) || 0;
+  const total = fixed + variable;
+  const fixedPct = total > 0 ? (fixed / total) * 100 : 0;
+  return (
+    <Card className="space-y-4 border-hairline-soft bg-surface-card">
+      <div>
+        <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
+          <Activity className="h-4 w-4 text-mute" aria-hidden />
+          Chi cố định vs biến đổi
+        </h2>
+        <p className="text-caption-sm text-mute">Ước tính từ {data.lookback_months} tháng gần nhất</p>
+      </div>
+      {data.recurring_items.length === 0 ? (
+        <p className="text-body-sm text-mute">Chưa phát hiện khoản chi định kỳ nào.</p>
+      ) : (
+        <>
+          <div className="space-y-1">
+            <div className="flex h-2.5 overflow-hidden rounded-full bg-surface-soft">
+              <div className="h-full bg-accent-blue" style={{ width: `${fixedPct}%` }} title="Cố định" />
+              <div className="h-full bg-accent-green" style={{ width: `${100 - fixedPct}%` }} title="Biến đổi" />
+            </div>
+            <div className="flex justify-between gap-2 text-caption-sm">
+              <span className="text-accent-blue">Cố định ~{formatMoney(data.fixed_monthly_estimate)}/tháng</span>
+              <span className="text-accent-green">Biến đổi {formatMoney(data.variable_last_month)}</span>
+            </div>
+          </div>
+          <div className="space-y-2 border-t border-hairline-soft pt-3">
+            <p className="text-caption-xs font-bold uppercase tracking-wide text-mute">Khoản định kỳ</p>
+            {data.recurring_items.slice(0, 6).map((item) => (
+              <div key={item.merchant_name} className="flex justify-between gap-3 text-caption-sm">
+                <span className="min-w-0 truncate text-ink">
+                  {item.merchant_name}
+                  <span className="ml-1 text-mute">· {item.months_active} tháng</span>
+                </span>
+                <span className="shrink-0 text-mute">~{formatMoney(item.avg_monthly_amount)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </Card>
   );
 }

@@ -12,10 +12,16 @@ from typing import Any
 
 from sqlmodel import Session, col, select
 
-from app.models.entities import Insight, InsightFeedback
+from app.core.config import get_settings
+from app.models.entities import Insight, InsightFeedback, UserSettings
+from app.services import analytics_queries as queries
 from app.services.analytics import compute_summary
 from app.services.budgets import compute_budget_usage
 from app.services.date_ranges import DateRange, RangePreset, previous_period, resolve_range
+from app.services.diagnostics import compute_spending_diagnostics
+from app.services.forecast import compute_forecast
+from app.services.insight_narrator import narrate_insight
+from pfa_shared.enums import AppEnv
 
 
 class InsightNotFoundError(Exception):
@@ -36,6 +42,16 @@ def _json_loads(value: str) -> list[dict[str, Any]]:
 
 def _decimal_str(value: Decimal) -> str:
     return f"{value:.2f}"
+
+
+def _user_allows_ai(session: Session, user_id: int) -> bool:
+    """Đọc cờ allow_ai_data_processing. Mặc định True nếu chưa có settings row."""
+    settings = session.exec(
+        select(UserSettings).where(UserSettings.user_id == user_id),
+    ).first()
+    if settings is None:
+        return True
+    return settings.allow_ai_data_processing
 
 
 def ensure_insight_owner(session: Session, *, insight_id: int, user_id: int) -> Insight:
@@ -168,12 +184,28 @@ def _create_or_reuse_insight(
         if existing is not None:
             return existing
 
+    # Narration LLM (B2) chỉ chạy khi tạo row MỚI (cache miss) → các request sau
+    # tái dùng row đã narrate, không gọi lại LLM. Gated bởi cờ quyền riêng tư.
+    # Bỏ qua trong môi trường test để giữ deterministic + không gọi mạng.
+    final_title = title
+    final_summary = summary
+    if get_settings().app_env != AppEnv.TEST and _user_allows_ai(session, user_id):
+        narrated = narrate_insight(
+            insight_type=type_,
+            base_title=title,
+            base_summary=summary,
+            evidence=evidence,
+        )
+        if narrated is not None:
+            final_title = narrated.title
+            final_summary = narrated.summary
+
     insight = Insight(
         user_id=user_id,
         type=type_,
         severity=severity,
-        title=title,
-        summary=summary,
+        title=final_title,
+        summary=final_summary,
         evidence_json=_json_dumps(evidence),
         actions_json=_json_dumps(actions),
         range_start=range_.start,
@@ -331,7 +363,216 @@ def generate_rule_based_insights(
             ),
         )
 
+    insights.extend(
+        _generate_advanced_insights(
+            session,
+            user_id=user_id,
+            range_=range_,
+            preset=preset,
+            force_refresh=force_refresh,
+            wants=wants,
+        ),
+    )
+
     return insights
+
+
+def _generate_advanced_insights(
+    session: Session,
+    *,
+    user_id: int,
+    range_: DateRange,
+    preset: RangePreset,
+    force_refresh: bool,
+    wants: Any,
+) -> list[Insight]:
+    """Luật insight nâng cao (B1): cảnh báo sớm vượt ngân sách, danh mục tăng
+    đột biến, merchant mới, chi cuối tuần cao. Tất cả deterministic từ aggregate.
+    """
+    out: list[Insight] = []
+
+    # --- budget_projected_exceed: dự báo SẼ vượt trước khi vượt thật ---
+    if wants("budget_projected_exceed"):
+        forecast = compute_forecast(session, user_id)
+        will_exceed = [b for b in forecast.budgets if b.status == "will_exceed"]
+        if will_exceed:
+            b = will_exceed[0]
+            exceed_date = (
+                b.projected_exceed_date.isoformat() if b.projected_exceed_date else None
+            )
+            out.append(
+                _create_or_reuse_insight(
+                    session,
+                    user_id=user_id,
+                    type_="budget_projected_exceed",
+                    severity="warning",
+                    title=f"{b.category_name} dự báo sẽ vượt ngân sách",
+                    summary=(
+                        f"Theo nhịp chi hiện tại, {b.category_name} dự kiến đạt "
+                        f"{_decimal_str(b.projected_spend)} VND "
+                        f"({b.projected_percent:.0f}% ngân sách) cuối tháng."
+                        + (f" Dự kiến chạm hạn mức ngày {exceed_date}." if exceed_date else "")
+                    ),
+                    evidence=[
+                        {
+                            "source_type": "forecast",
+                            "category_id": b.category_id,
+                            "category_name": b.category_name,
+                            "budget_amount": _decimal_str(b.budget_amount),
+                            "spent_so_far": _decimal_str(b.spent_so_far),
+                            "projected_spend": _decimal_str(b.projected_spend),
+                            "projected_percent": b.projected_percent,
+                            "projected_exceed_date": exceed_date,
+                        },
+                    ],
+                    actions=[
+                        {
+                            "type": "open_budgets",
+                            "label": "Xem ngân sách",
+                            "params": {"category_id": b.category_id},
+                        },
+                    ],
+                    range_=range_,
+                    force_refresh=force_refresh,
+                ),
+            )
+
+    # --- category_surge: 1 danh mục tăng mạnh so kỳ trước ---
+    if wants("category_surge"):
+        previous = previous_period(range_, preset)
+        diag = compute_spending_diagnostics(
+            session, user_id, range_, previous, top_drivers=3,
+        )
+        surge = next(
+            (
+                d
+                for d in diag.drivers
+                if d.direction == "increase"
+                and d.previous_amount > 0
+                and d.delta_percent is not None
+                and d.delta_percent >= 50.0
+            ),
+            None,
+        )
+        if surge is not None:
+            top_m = surge.top_merchants[0].merchant_name if surge.top_merchants else None
+            out.append(
+                _create_or_reuse_insight(
+                    session,
+                    user_id=user_id,
+                    type_="category_surge",
+                    severity="watch",
+                    title=f"{surge.category_name} tăng mạnh so với kỳ trước",
+                    summary=(
+                        f"{surge.category_name} tăng {_decimal_str(surge.delta_amount)} VND "
+                        f"(+{surge.delta_percent:.0f}%) so với kỳ trước."
+                        + (f" Chủ yếu từ {top_m}." if top_m else "")
+                    ),
+                    evidence=[
+                        {
+                            "source_type": "diagnostics",
+                            "category_id": surge.category_id,
+                            "category_name": surge.category_name,
+                            "current_amount": _decimal_str(surge.current_amount),
+                            "previous_amount": _decimal_str(surge.previous_amount),
+                            "delta_amount": _decimal_str(surge.delta_amount),
+                            "delta_percent": surge.delta_percent,
+                        },
+                    ],
+                    actions=[
+                        {
+                            "type": "open_transactions",
+                            "label": "Xem giao dịch",
+                            "params": {"category_id": surge.category_id},
+                        },
+                    ],
+                    range_=range_,
+                    force_refresh=force_refresh,
+                ),
+            )
+
+    # --- new_merchant: merchant lần đầu xuất hiện trong kỳ ---
+    if wants("new_merchant"):
+        seen_before = queries.query_merchants_seen_before(
+            session, user_id, before=range_.start,
+        )
+        current_merchants = queries.query_merchant_aggregates(
+            session, user_id, range_, limit=20, exclude_unknown=True,
+        )
+        new_ones = [
+            m
+            for m in current_merchants
+            if m.merchant_name.lower().strip() not in seen_before
+        ]
+        if new_ones:
+            new_ones.sort(key=lambda m: m.total_amount, reverse=True)
+            top = new_ones[0]
+            extra = len(new_ones) - 1
+            out.append(
+                _create_or_reuse_insight(
+                    session,
+                    user_id=user_id,
+                    type_="new_merchant",
+                    severity="info",
+                    title=f"Cửa hàng mới: {top.merchant_name}",
+                    summary=(
+                        f"Bạn lần đầu chi tại {top.merchant_name} "
+                        f"({_decimal_str(top.total_amount)} VND) trong kỳ này."
+                        + (f" Và {extra} cửa hàng mới khác." if extra > 0 else "")
+                    ),
+                    evidence=[
+                        {
+                            "source_type": "transactions",
+                            "merchant_name": top.merchant_name,
+                            "total_amount": _decimal_str(top.total_amount),
+                            "transaction_count": top.transaction_count,
+                            "new_merchant_count": len(new_ones),
+                        },
+                    ],
+                    actions=[{"type": "open_transactions", "label": "Xem giao dịch"}],
+                    range_=range_,
+                    force_refresh=force_refresh,
+                ),
+            )
+
+    # --- weekend_spike: chi cuối tuần/ngày cao hơn ngày thường rõ rệt ---
+    if wants("weekend_spike"):
+        wd_total, wd_days, we_total, we_days = queries.query_weekday_weekend_totals(
+            session, user_id, range_,
+        )
+        if wd_days > 0 and we_days > 0:
+            wd_avg = wd_total / wd_days
+            we_avg = we_total / we_days
+            if wd_avg > 0 and we_avg >= wd_avg * Decimal("1.5"):
+                ratio = float(round((we_avg / wd_avg) * Decimal("100"), 0))
+                out.append(
+                    _create_or_reuse_insight(
+                        session,
+                        user_id=user_id,
+                        type_="weekend_spike",
+                        severity="info",
+                        title="Chi cuối tuần cao hơn ngày thường",
+                        summary=(
+                            f"Trung bình mỗi ngày cuối tuần bạn chi "
+                            f"{_decimal_str(we_avg)} VND, bằng {ratio:.0f}% so với "
+                            f"ngày thường ({_decimal_str(wd_avg)} VND/ngày)."
+                        ),
+                        evidence=[
+                            {
+                                "source_type": "transactions",
+                                "weekday_avg": _decimal_str(wd_avg),
+                                "weekend_avg": _decimal_str(we_avg),
+                                "weekday_days": wd_days,
+                                "weekend_days": we_days,
+                            },
+                        ],
+                        actions=[{"type": "open_analytics", "label": "Xem phân tích"}],
+                        range_=range_,
+                        force_refresh=force_refresh,
+                    ),
+                )
+
+    return out
 
 
 def resolve_insight_range(

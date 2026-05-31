@@ -84,6 +84,116 @@ export type AnalyticsCategoriesResponse = {
   items: CategoryBreakdown[];
 };
 
+export type ProductBreakdown = {
+  item_name: string;
+  total_amount: string;
+  total_quantity: string;
+  line_count: number;
+  percentage: number;
+};
+
+export type AnalyticsProductsResponse = {
+  range: RangeInfo;
+  items: ProductBreakdown[];
+};
+
+export type SellerBreakdown = {
+  seller_name: string;
+  seller_tax_id: string | null;
+  total_amount: string;
+  invoice_count: number;
+  percentage: number;
+};
+
+export type AnalyticsTaxResponse = {
+  range: RangeInfo;
+  subtotal_before_tax: string;
+  total_tax: string;
+  grand_total: string;
+  invoice_count: number;
+  effective_tax_rate: number;
+  top_sellers: SellerBreakdown[];
+};
+
+export type AnalyticsReceiptStatsResponse = {
+  range: RangeInfo;
+  total_receipts: number;
+  ready_count: number;
+  failed_count: number;
+  pending_count: number;
+  with_invoice_count: number;
+  confirmed_count: number;
+  ocr_success_rate: number;
+};
+
+export type MerchantContribution = {
+  merchant_name: string;
+  current_amount: string;
+  previous_amount: string;
+  delta_amount: string;
+};
+
+export type CategoryDriver = {
+  category_id: number | null;
+  category_name: string;
+  current_amount: string;
+  previous_amount: string;
+  delta_amount: string;
+  delta_percent: number | null;
+  direction: "increase" | "decrease" | string;
+  top_merchants: MerchantContribution[];
+};
+
+export type AnalyticsDiagnosticsResponse = {
+  range: RangeInfo;
+  previous_range: RangeInfo;
+  current_total: string;
+  previous_total: string;
+  delta_amount: string;
+  delta_percent: number | null;
+  drivers: CategoryDriver[];
+};
+
+export type MonthSpendForecast = {
+  period_month: string;
+  days_elapsed: number;
+  days_in_month: number;
+  spent_so_far: string;
+  daily_run_rate: string;
+  projected_total: string;
+};
+
+export type BudgetForecast = {
+  category_id: number;
+  category_name: string;
+  budget_amount: string;
+  spent_so_far: string;
+  projected_spend: string;
+  projected_percent: number;
+  status: "on_track" | "warning" | "will_exceed" | "exceeded" | string;
+  projected_exceed_date: string | null;
+};
+
+export type AnalyticsForecastResponse = {
+  month: MonthSpendForecast;
+  budgets: BudgetForecast[];
+};
+
+export type RecurringItem = {
+  merchant_name: string;
+  months_active: number;
+  avg_monthly_amount: string;
+  last_amount: string;
+  last_date: string;
+};
+
+export type AnalyticsRecurringResponse = {
+  lookback_months: number;
+  fixed_monthly_estimate: string;
+  variable_last_month: string;
+  recurring_items: RecurringItem[];
+};
+
 export type AnalyticsQuery = {
   range?: RangePreset;
   start_date?: string;
@@ -120,4 +230,28 @@ export function getAnalyticsBudgets(periodMonth: string) {
 
 export function getAnalyticsInsightFeed(params: AnalyticsQuery & { limit?: number; auto_generate?: boolean } = {}) {
   return apiRequest<AnalyticsInsightFeedResponse>(`/api/v1/analytics/insight-feed${buildQuery(params)}`);
+}
+
+export function getAnalyticsProducts(params: AnalyticsQuery & { limit?: number } = {}) {
+  return apiRequest<AnalyticsProductsResponse>(`/api/v1/analytics/products${buildQuery(params)}`);
+}
+
+export function getAnalyticsTax(params: AnalyticsQuery & { sellers_limit?: number } = {}) {
+  return apiRequest<AnalyticsTaxResponse>(`/api/v1/analytics/tax${buildQuery(params)}`);
+}
+
+export function getAnalyticsReceiptsStats(params: AnalyticsQuery = {}) {
+  return apiRequest<AnalyticsReceiptStatsResponse>(`/api/v1/analytics/receipts-stats${buildQuery(params)}`);
+}
+
+export function getAnalyticsDiagnostics(params: AnalyticsQuery & { top_drivers?: number; compare?: "previous_period" | "year_ago" } = {}) {
+  return apiRequest<AnalyticsDiagnosticsResponse>(`/api/v1/analytics/diagnostics${buildQuery(params)}`);
+}
+
+export function getAnalyticsForecast() {
+  return apiRequest<AnalyticsForecastResponse>(`/api/v1/analytics/forecast`);
+}
+
+export function getAnalyticsRecurring(params: { lookback_months?: number } = {}) {
+  return apiRequest<AnalyticsRecurringResponse>(`/api/v1/analytics/recurring${buildQuery(params)}`);
 }

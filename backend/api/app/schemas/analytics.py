@@ -244,6 +244,28 @@ class AnalyticsForecastResponse(BaseModel):
     budgets: list[BudgetForecastResponse]
 
 
+# --- Fixed vs Variable / recurring (C2) ---
+
+
+class RecurringItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    merchant_name: str
+    months_active: int = Field(ge=0)
+    avg_monthly_amount: Decimal
+    last_amount: Decimal
+    last_date: date
+
+
+class AnalyticsRecurringResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    lookback_months: int = Field(ge=1)
+    fixed_monthly_estimate: Decimal
+    variable_last_month: Decimal
+    recurring_items: list[RecurringItemResponse]
+
+
 __all__ = [
     "AnalyticsBudgetsResponse",
     "AnalyticsCategoriesResponse",
@@ -255,6 +277,7 @@ __all__ = [
     "AnalyticsMerchantsResponse",
     "AnalyticsProductsResponse",
     "AnalyticsReceiptStatsResponse",
+    "AnalyticsRecurringResponse",
     "AnalyticsTaxResponse",
     "AnalyticsTrendsResponse",
     "AnomalyResponse",
@@ -266,6 +289,7 @@ __all__ = [
     "MerchantContributionResponse",
     "MonthSpendForecastResponse",
     "ProductBreakdownResponse",
+    "RecurringItemResponse",
     "SellerBreakdownResponse",
     "TrendPointResponse",
 ]

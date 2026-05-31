@@ -135,6 +135,24 @@ def resolve_range(
     return DateRange(start=custom_start, end=custom_end)
 
 
+def year_ago_period(current: DateRange) -> DateRange:
+    """Trả range cùng độ dài nhưng lùi đúng 1 năm (so sánh YoY).
+
+    Dùng cho diagnostics khi user muốn so cùng kỳ năm trước thay vì kỳ liền trước.
+    Xử lý 29/02 an toàn bằng cách lùi theo năm trên từng mốc; nếu ngày không tồn
+    tại ở năm trước (29/02) thì lùi về 28/02.
+    """
+
+    def _shift_year(d: date) -> date:
+        try:
+            return d.replace(year=d.year - 1)
+        except ValueError:
+            # 29/02 -> 28/02 năm trước (năm không nhuận).
+            return d.replace(year=d.year - 1, day=28)
+
+    return DateRange(start=_shift_year(current.start), end=_shift_year(current.end))
+
+
 def previous_period(current: DateRange, preset: RangePreset) -> DateRange:
     """Trả range trước đó để so sánh delta.
 
@@ -172,4 +190,5 @@ __all__ = [
     "RangePreset",
     "previous_period",
     "resolve_range",
+    "year_ago_period",
 ]

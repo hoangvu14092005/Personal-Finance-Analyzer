@@ -25,6 +25,7 @@ depends_on = None
 SYSTEM_CATEGORIES: list[tuple[str, str]] = [
     ("Ăn uống", "#f59e0b"),
     ("Cà phê & đồ uống", "#d97706"),
+    ("Thực phẩm & siêu thị", "#22c55e"),
     ("Di chuyển", "#10b981"),
     ("Mua sắm", "#3b82f6"),
     ("Hóa đơn & tiện ích", "#ef4444"),

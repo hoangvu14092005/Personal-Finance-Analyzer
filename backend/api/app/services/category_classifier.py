@@ -35,6 +35,12 @@ def _build_prompt(merchant_name: str, categories: list[tuple[int, str]]) -> str:
         "Bạn là trợ lý phân loại chi tiêu cá nhân. Cho tên cửa hàng/đơn vị bán "
         "và danh sách danh mục (id: tên), hãy chọn ĐÚNG MỘT danh mục phù hợp "
         "nhất.\n\n"
+        "Lưu ý phân biệt:\n"
+        '- "Thực phẩm & siêu thị": siêu thị, cửa hàng tiện lợi, tạp hóa, hàng '
+        "tiêu dùng thiết yếu (WinMart, Co.opmart, Bách Hóa Xanh, mart, siêu "
+        "thị, cửa hàng tiện lợi).\n"
+        '- "Mua sắm": thời trang, đồ điện tử, đồ gia dụng, bán lẻ không phải '
+        "thực phẩm (Canifa, Uniqlo, Miniso, shop quần áo).\n\n"
         f"Tên cửa hàng: {merchant_name}\n\n"
         f"Danh sách danh mục:\n{listing}\n\n"
         'Trả về DUY NHẤT JSON dạng {"category_id": <id>} với id nằm trong danh '

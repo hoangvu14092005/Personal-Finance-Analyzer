@@ -271,10 +271,57 @@ def query_merchant_aggregates_for_category(
     ]
 
 
+def query_merchants_seen_before(
+    session: Session,
+    user_id: int,
+    *,
+    before: date,
+) -> set[str]:
+    """Tập merchant_name (lower/trim) user đã giao dịch TRƯỚC ngày `before`.
+
+    Dùng để phát hiện merchant lần đầu xuất hiện trong kỳ (insight new_merchant).
+    """
+    name_expr = func.lower(func.trim(Transaction.merchant_name))
+    statement = (
+        select(name_expr)
+        .where(Transaction.user_id == user_id)
+        .where(col(Transaction.merchant_name).is_not(None))
+        .where(Transaction.merchant_name != "")
+        .where(Transaction.transaction_date < before)
+        .group_by(name_expr)
+    )
+    return {str(row) for row in session.exec(statement).all() if row}
+
+
+def query_weekday_weekend_totals(
+    session: Session,
+    user_id: int,
+    range_: DateRange,
+) -> tuple[Decimal, int, Decimal, int]:
+    """Tổng chi + số ngày riêng biệt cho ngày thường vs cuối tuần trong range.
+
+    Trả (weekday_total, weekday_distinct_days, weekend_total, weekend_distinct_days).
+    Tính ở Python từ daily aggregates để tránh phụ thuộc hàm DOW theo dialect.
+    """
+    daily = query_daily_aggregates(session, user_id, range_)
+    wd_total = Decimal("0")
+    we_total = Decimal("0")
+    wd_days = 0
+    we_days = 0
+    for day, total, _count in daily:
+        # Monday=0 ... Sunday=6; cuối tuần = thứ 7 (5), CN (6).
+        if day.weekday() >= 5:
+            we_total += total
+            we_days += 1
+        else:
+            wd_total += total
+            wd_days += 1
+    return wd_total, wd_days, we_total, we_days
+
+
 # ---------------------------------------------------------------------------
 # Sản phẩm / line items (từ receipt_line_items đã confirm)
 # ---------------------------------------------------------------------------
-
 
 def query_product_aggregates(
     session: Session,

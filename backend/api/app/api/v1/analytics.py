@@ -25,6 +25,7 @@ from app.schemas.analytics import (
     AnalyticsMerchantsResponse,
     AnalyticsProductsResponse,
     AnalyticsReceiptStatsResponse,
+    AnalyticsRecurringResponse,
     AnalyticsTaxResponse,
     AnalyticsTrendsResponse,
     AnomalyResponse,
@@ -36,6 +37,7 @@ from app.schemas.analytics import (
     MerchantContributionResponse,
     MonthSpendForecastResponse,
     ProductBreakdownResponse,
+    RecurringItemResponse,
     SellerBreakdownResponse,
     TrendPointResponse,
 )
@@ -68,9 +70,11 @@ from app.services.date_ranges import (
     RangePreset,
     previous_period,
     resolve_range,
+    year_ago_period,
 )
 from app.services.diagnostics import compute_spending_diagnostics
 from app.services.forecast import compute_forecast
+from app.services.recurring import compute_fixed_vs_variable
 from app.services.insights import (
     generate_rule_based_insights,
     insight_to_payload,
@@ -498,13 +502,21 @@ def get_analytics_diagnostics(
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
     top_drivers: int = Query(5, ge=1, le=10),
+    compare: str = Query(
+        "previous_period",
+        pattern="^(previous_period|year_ago)$",
+        description="Mốc so sánh: previous_period (kỳ liền trước) | year_ago (cùng kỳ năm trước)",
+    ),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> AnalyticsDiagnosticsResponse:
     """Phân rã nguyên nhân thay đổi chi tiêu so với kỳ trước (theo category + merchant)."""
     user_id = _require_user_id(current_user)
     preset, current_range = _resolve_requested_range(range, start_date, end_date)
-    previous_range = previous_period(current_range, preset)
+    if compare == "year_ago":
+        previous_range = year_ago_period(current_range)
+    else:
+        previous_range = previous_period(current_range, preset)
     diag = compute_spending_diagnostics(
         session, user_id, current_range, previous_range, top_drivers=top_drivers,
     )
@@ -568,6 +580,32 @@ def get_analytics_forecast(
                 projected_exceed_date=b.projected_exceed_date,
             )
             for b in forecast.budgets
+        ],
+    )
+
+
+@router.get("/recurring", response_model=AnalyticsRecurringResponse)
+def get_analytics_recurring(
+    lookback_months: int = Query(6, ge=2, le=12),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> AnalyticsRecurringResponse:
+    """Phân tách chi cố định (định kỳ) vs biến đổi theo cửa sổ nhìn lại."""
+    user_id = _require_user_id(current_user)
+    summary = compute_fixed_vs_variable(session, user_id, lookback_months=lookback_months)
+    return AnalyticsRecurringResponse(
+        lookback_months=summary.lookback_months,
+        fixed_monthly_estimate=summary.fixed_monthly_estimate,
+        variable_last_month=summary.variable_last_month,
+        recurring_items=[
+            RecurringItemResponse(
+                merchant_name=item.merchant_name,
+                months_active=item.months_active,
+                avg_monthly_amount=item.avg_monthly_amount,
+                last_amount=item.last_amount,
+                last_date=item.last_date,
+            )
+            for item in summary.recurring_items
         ],
     )
 

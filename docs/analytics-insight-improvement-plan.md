@@ -174,3 +174,36 @@ Bổ sung vào `generate_rule_based_insights`, mỗi luật có `type` riêng + 
 1. Đợt 1 làm đủ A1-A4 hay chọn lọc (vd chỉ forecast + diagnostics trước)?
 2. Insight LLM (B2): làm ngay đợt 2 hay để sau (giữ deterministic trước)?
 3. Heatmap (A5) và Nhóm C: tách spec riêng hay gộp vào đây?
+
+---
+
+## 11. Trạng thái triển khai (cập nhật)
+
+Đã quyết định: **làm hết cả 3 nhóm**. Kết quả:
+
+### Đợt 1 — Nhóm A (DONE)
+- A1 Forecast: lib `getAnalyticsForecast` + card "Dự báo cuối tháng" (progress + ngày dự kiến vượt ngân sách).
+- A2 Diagnostics: lib `getAnalyticsDiagnostics` + card "Vì sao chi tiêu thay đổi" (driver theo danh mục + merchant).
+- A3 Products: lib `getAnalyticsProducts` + card "Top sản phẩm / món".
+- A4 Tax: lib `getAnalyticsTax` + card "VAT & người bán".
+- A5 Calendar: lib có sẵn + card "Lịch nhiệt chi tiêu" (heatmap tuần × thứ, cường độ 0-4).
+- (receipts-stats: đã thêm lib wrapper `getAnalyticsReceiptsStats`, chưa render card — để dành.)
+
+### Đợt 2 — Nhóm B (DONE)
+- B1: 4 luật insight mới trong `insights.py` — `budget_projected_exceed`, `category_surge`, `new_merchant`, `weekend_spike` (deterministic, có ngưỡng). Thêm query helper `query_merchants_seen_before`, `query_weekday_weekend_totals`.
+- B2: `insight_narrator.py` — LLM diễn giải `title`/`summary` từ evidence, fail-soft, gated bởi `allow_ai_data_processing`, bỏ qua trong môi trường test, chỉ chạy khi tạo row mới (cache narration).
+- B3: nút hành động (actionable) ở trang Insights — điều hướng theo `actions` (open_transactions/open_budgets/open_analytics).
+
+### Đợt 3 — Nhóm C (DONE)
+- C1 YoY: thêm `year_ago_period` + tham số `compare=previous_period|year_ago` cho endpoint `/analytics/diagnostics`.
+- C2 Cố định vs biến đổi: `recurring.py` + endpoint `/analytics/recurring` + card "Chi cố định vs biến đổi" (phát hiện merchant định kỳ theo số tháng xuất hiện).
+
+### Kiểm thử
+- Toàn bộ backend: **321 test pass, 0 fail**.
+- Smoke 7 endpoint mới/đổi qua API live: tất cả 200 + JSON hợp lệ.
+- Frontend: 0 lỗi type/diagnostics; trang analytics compile 200.
+
+### Còn để dành (không bắt buộc)
+- e2e Playwright cho từng card mới (mock route) — nên bổ sung khi rảnh.
+- Card receipts-stats (đã có lib, chưa render).
+- C3 heatmap drill-down (click ngày → xem giao dịch).
