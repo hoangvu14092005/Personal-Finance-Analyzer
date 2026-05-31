@@ -16,9 +16,13 @@ from sqlmodel import Session
 from app.core.logging import get_logger
 from app.services.chat.queries import (
     compare_periods,
+    diagnose_spending_change,
+    forecast_month_spending,
     get_budget_status,
+    get_product_breakdown,
     get_recent_transactions,
     get_spending_by_day,
+    get_tax_summary,
     get_top_merchants,
     lookup_transaction_receipts,
     query_spending_summary,
@@ -347,6 +351,84 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             "required": ["query"],
         },
         handler=semantic_search_transactions,
+    ),
+    "get_product_breakdown": ToolDefinition(
+        name="get_product_breakdown",
+        description=(
+            "Get top products/items bought, aggregated from confirmed receipt"
+            " line items. Use when user asks which products/items they spent on"
+            " (e.g., 'tôi mua món gì nhiều nhất', 'chi cho cà phê bao nhiêu')."
+        ),
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "date_range": {
+                    "type": "string",
+                    "enum": ["7d", "30d", "this_month", "last_month"],
+                    "description": "Time period preset",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max products (default 10, max 50)",
+                },
+            },
+            "required": [],
+        },
+        handler=get_product_breakdown,
+    ),
+    "get_tax_summary": ToolDefinition(
+        name="get_tax_summary",
+        description=(
+            "Get total VAT/tax paid and top sellers (by tax id), from confirmed"
+            " e-invoices. Use when user asks about VAT, thuế, hóa đơn đỏ, or"
+            " spending grouped by seller tax id."
+        ),
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "date_range": {
+                    "type": "string",
+                    "enum": ["7d", "30d", "this_month", "last_month"],
+                    "description": "Time period preset",
+                },
+            },
+            "required": [],
+        },
+        handler=get_tax_summary,
+    ),
+    "diagnose_spending_change": ToolDefinition(
+        name="diagnose_spending_change",
+        description=(
+            "Explain WHY spending changed vs the previous period: which categories"
+            " and merchants drove the change. Use for 'vì sao tháng này tôi tiêu"
+            " nhiều hơn', 'cái gì làm chi tăng/giảm'."
+        ),
+        parameters_schema={
+            "type": "object",
+            "properties": {
+                "date_range": {
+                    "type": "string",
+                    "enum": ["7d", "30d", "this_month", "last_month"],
+                    "description": "Period to diagnose (compared to its previous period)",
+                },
+            },
+            "required": [],
+        },
+        handler=diagnose_spending_change,
+    ),
+    "forecast_month_spending": ToolDefinition(
+        name="forecast_month_spending",
+        description=(
+            "Forecast end-of-month spending using current run-rate, and warn which"
+            " budgets are projected to exceed. Use for 'cuối tháng tôi tiêu hết bao"
+            " nhiêu', 'có vượt ngân sách không', 'dự báo chi tiêu'."
+        ),
+        parameters_schema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=forecast_month_spending,
     ),
 }
 

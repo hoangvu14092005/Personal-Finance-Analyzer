@@ -44,14 +44,32 @@ const NAV_GROUPS = [
   },
 ];
 
-function isActive(pathname: string | null, href: string): boolean {
-  if (!pathname) return false;
+const ALL_NAV_HREFS = NAV_GROUPS.flatMap((group) => group.items.map((item) => item.href));
+
+function hrefMatches(pathname: string, href: string): boolean {
   if (href === "/dashboard") return pathname === "/" || pathname.startsWith("/dashboard");
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/**
+ * Trả về href cụ thể nhất (dài nhất) khớp với pathname hiện tại, để mỗi route
+ * chỉ làm sáng đúng một mục. Tránh trường hợp `/receipts/upload` làm sáng cả
+ * `/receipts` (vì `/receipts` là tiền tố của `/receipts/upload`).
+ */
+function resolveActiveHref(pathname: string | null): string | null {
+  if (!pathname) return null;
+  let best: string | null = null;
+  for (const href of ALL_NAV_HREFS) {
+    if (hrefMatches(pathname, href) && (best === null || href.length > best.length)) {
+      best = href;
+    }
+  }
+  return best;
+}
+
 function NavGroups({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const activeHref = resolveActiveHref(pathname);
   return (
     <nav className="space-y-6" aria-label="Primary navigation">
       {NAV_GROUPS.map((group) => (
@@ -61,7 +79,7 @@ function NavGroups({ onNavigate }: { onNavigate?: () => void }) {
           </p>
           <div className="space-y-1">
             {group.items.map((item) => {
-              const active = isActive(pathname, item.href);
+              const active = item.href === activeHref;
               const Icon = item.icon;
               return (
                 <Link

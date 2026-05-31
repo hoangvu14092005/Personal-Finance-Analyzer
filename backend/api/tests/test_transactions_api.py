@@ -95,6 +95,24 @@ def test_create_transaction_manual_entry_success(
     assert body["receipt_upload_id"] is None
 
 
+def test_create_transaction_forces_vnd_currency(
+    client: TestClient,
+    auth_user: User,
+) -> None:
+    # VND-only (G2): dù client gửi USD, server vẫn lưu VND.
+    response = client.post(
+        "/api/v1/transactions",
+        json={
+            "amount": "100.00",
+            "currency": "USD",
+            "transaction_date": "2026-04-01",
+            "merchant_name": "Amazon",
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["currency"] == "VND"
+
+
 def test_create_transaction_zero_amount_returns_validation_error(
     client: TestClient,
     auth_user: User,

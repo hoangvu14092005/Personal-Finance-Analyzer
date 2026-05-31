@@ -151,3 +151,133 @@ def test_list_categories_invalid_token_returns_401(
     client.cookies.set("pfa_session", token)
     response = client.get("/api/v1/categories")
     assert response.status_code == 401
+
+
+class TestCategoryCreate:
+    def test_create_category(self, client: TestClient, auth_user: User) -> None:
+        response = client.post(
+            "/api/v1/categories",
+            json={"name": "Thú cưng", "color": "#123456"},
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["name"] == "Thú cưng"
+        assert body["color"] == "#123456"
+        assert body["is_system"] is False
+        assert body["user_id"] == auth_user.id
+
+    def test_create_duplicate_name_conflicts(
+        self,
+        client: TestClient,
+        auth_user: User,
+        engine: Engine,
+    ) -> None:
+        _seed_category(engine, name="Food", is_system=True, user_id=None)
+        response = client.post("/api/v1/categories", json={"name": "Food"})
+        assert response.status_code == 409
+
+    def test_create_requires_auth(self, client: TestClient) -> None:
+        # Unauthenticated client (no auth_user fixture).
+        fresh = TestClient(client.app)
+        response = fresh.post("/api/v1/categories", json={"name": "X"})
+        assert response.status_code == 401
+
+
+class TestCategoryUpdate:
+    def test_update_own_category(
+        self,
+        client: TestClient,
+        auth_user: User,
+        engine: Engine,
+    ) -> None:
+        assert auth_user.id is not None
+        cat_id = _seed_category(engine, name="Old", is_system=False, user_id=auth_user.id)
+        response = client.patch(
+            f"/api/v1/categories/{cat_id}",
+            json={"name": "New", "color": "#abcdef"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["name"] == "New"
+        assert body["color"] == "#abcdef"
+
+    def test_cannot_update_system_category(
+        self,
+        client: TestClient,
+        auth_user: User,
+        engine: Engine,
+    ) -> None:
+        sys_id = _seed_category(engine, name="Food", is_system=True, user_id=None)
+        response = client.patch(f"/api/v1/categories/{sys_id}", json={"name": "Hacked"})
+        assert response.status_code == 403
+
+    def test_cannot_update_other_users_category(
+        self,
+        client: TestClient,
+        auth_user: User,
+        engine: Engine,
+    ) -> None:
+        other_id = _seed_user(engine, "other2@example.com")
+        cat_id = _seed_category(engine, name="Private", is_system=False, user_id=other_id)
+        response = client.patch(f"/api/v1/categories/{cat_id}", json={"name": "X"})
+        assert response.status_code == 404
+
+
+class TestCategoryDelete:
+    def test_delete_own_category(
+        self,
+        client: TestClient,
+        auth_user: User,
+        engine: Engine,
+    ) -> None:
+        assert auth_user.id is not None
+        cat_id = _seed_category(engine, name="ToDelete", is_system=False, user_id=auth_user.id)
+        response = client.delete(f"/api/v1/categories/{cat_id}")
+        assert response.status_code == 204
+
+        # Không còn trong list.
+        listing = client.get("/api/v1/categories").json()["items"]
+        assert all(item["id"] != cat_id for item in listing)
+
+    def test_delete_unsets_transaction_category(
+        self,
+        client: TestClient,
+        auth_user: User,
+        engine: Engine,
+    ) -> None:
+        from datetime import date
+        from decimal import Decimal
+
+        from app.models.entities import Transaction
+
+        assert auth_user.id is not None
+        cat_id = _seed_category(engine, name="Temp", is_system=False, user_id=auth_user.id)
+        with Session(engine) as session:
+            tx = Transaction(
+                user_id=auth_user.id,
+                category_id=cat_id,
+                amount=Decimal("1000"),
+                transaction_date=date(2026, 5, 1),
+            )
+            session.add(tx)
+            session.commit()
+            session.refresh(tx)
+            tx_id = tx.id
+
+        response = client.delete(f"/api/v1/categories/{cat_id}")
+        assert response.status_code == 204
+
+        with Session(engine) as session:
+            tx = session.get(Transaction, tx_id)
+            assert tx is not None
+            assert tx.category_id is None
+
+    def test_cannot_delete_system_category(
+        self,
+        client: TestClient,
+        auth_user: User,
+        engine: Engine,
+    ) -> None:
+        sys_id = _seed_category(engine, name="Food", is_system=True, user_id=None)
+        response = client.delete(f"/api/v1/categories/{sys_id}")
+        assert response.status_code == 403

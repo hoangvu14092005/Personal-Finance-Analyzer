@@ -166,7 +166,7 @@ test.describe("Mobile responsive layout", () => {
   });
 
   for (const [path, heading] of [
-    ["/dashboard", "Chào mừng trở lại, Người dùng PFA!"],
+    ["/dashboard", /^Chào mừng trở lại/],
     ["/analytics", "Phân tích chi tiết tiêu dùng"],
     ["/receipts", "Nhật ký danh sách hóa đơn tải lên"],
     ["/receipts/upload", "Tự Động Trích Xuất Hóa Đơn (OCR Scan)"],
@@ -179,7 +179,11 @@ test.describe("Mobile responsive layout", () => {
   ] as const) {
     test(`${path} fits mobile viewport without page-level horizontal overflow`, async ({ page }) => {
       await page.goto(path);
-      await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+      const matcher =
+        typeof heading === "string"
+          ? { name: heading, exact: true }
+          : { name: heading };
+      await expect(page.getByRole("heading", matcher)).toBeVisible();
       await expectNoPageHorizontalOverflow(page);
     });
   }

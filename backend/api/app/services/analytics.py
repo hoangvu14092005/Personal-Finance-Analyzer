@@ -18,9 +18,10 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy.engine import Row
-from sqlmodel import Session, col, func, select
+from sqlmodel import Session, col, select
 
 from app.models.entities import Category, Transaction
+from app.services import analytics_queries as queries
 from app.services.date_ranges import DateRange
 
 # Top N category cho dashboard. UI sẽ render thêm nhóm "Khác" nếu cần.
@@ -121,21 +122,9 @@ def _query_period_totals(
     user_id: int,
     range_: DateRange,
 ) -> PeriodTotals:
-    """SUM(amount) + COUNT(*) cho range."""
-    statement = (
-        select(
-            func.coalesce(func.sum(Transaction.amount), 0),
-            func.count(Transaction.id),
-        )
-        .where(Transaction.user_id == user_id)
-        .where(Transaction.transaction_date >= range_.start)
-        .where(Transaction.transaction_date <= range_.end)
-    )
-    row = session.exec(statement).one()
-    total_raw, count_raw = row
-    # SQLite trả 0 (int) khi không có row; cast về Decimal để consistent.
-    total = Decimal(str(total_raw)) if total_raw is not None else Decimal("0")
-    return PeriodTotals(total_spend=total, transaction_count=int(count_raw or 0))
+    """SUM(amount) + COUNT(*) cho range (qua tầng query hợp nhất)."""
+    total, count = queries.query_period_totals(session, user_id, range_)
+    return PeriodTotals(total_spend=total, transaction_count=count)
 
 
 def _query_top_categories(
@@ -145,31 +134,17 @@ def _query_top_categories(
     total_spend: Decimal,
     limit: int = DEFAULT_TOP_CATEGORIES_LIMIT,
 ) -> list[CategoryBreakdown]:
-    """GROUP BY category, ORDER BY SUM DESC, LIMIT N.
+    """GROUP BY category, ORDER BY SUM DESC, LIMIT N (qua tầng query hợp nhất).
 
     Giao dịch không có category (`category_id IS NULL`) được gộp vào nhóm
     "Chưa phân loại" để UI vẫn hiển thị.
     """
-    total_expr = func.coalesce(func.sum(Transaction.amount), 0).label("total")
-    statement = (
-        select(
-            Transaction.category_id,
-            total_expr,
-            func.count(Transaction.id).label("cnt"),
-        )
-        .where(Transaction.user_id == user_id)
-        .where(Transaction.transaction_date >= range_.start)
-        .where(Transaction.transaction_date <= range_.end)
-        .group_by(col(Transaction.category_id))
-        .order_by(total_expr.desc())
-        .limit(limit)
-    )
-    rows = session.exec(statement).all()
+    rows = queries.query_category_aggregates(session, user_id, range_, limit=limit)
     if not rows:
         return []
 
     # Lấy categories trong 1 query để có name + color.
-    category_ids = [row[0] for row in rows if row[0] is not None]
+    category_ids = [row.category_id for row in rows if row.category_id is not None]
     category_map: dict[int, Category] = {}
     if category_ids:
         cat_statement = select(Category).where(col(Category.id).in_(category_ids))
@@ -179,9 +154,9 @@ def _query_top_categories(
 
     breakdowns: list[CategoryBreakdown] = []
     for row in rows:
-        category_id = row[0]
-        amount = Decimal(str(row[1])) if row[1] is not None else Decimal("0")
-        count = int(row[2] or 0)
+        category_id = row.category_id
+        amount = row.total_amount
+        count = row.transaction_count
 
         if category_id is None:
             name = "Chưa phân loại"
@@ -342,35 +317,18 @@ def compute_merchant_breakdown(
     totals = _query_period_totals(session, user_id, range_)
     total_spend = totals.total_spend
 
-    merchant_expr = func.coalesce(Transaction.merchant_name, "Không rõ").label("merchant")
-    total_expr = func.coalesce(func.sum(Transaction.amount), 0).label("total")
-    statement = (
-        select(
-            merchant_expr,
-            total_expr,
-            func.count(Transaction.id).label("cnt"),
-        )
-        .where(Transaction.user_id == user_id)
-        .where(Transaction.transaction_date >= range_.start)
-        .where(Transaction.transaction_date <= range_.end)
-        .group_by(merchant_expr)
-        .order_by(total_expr.desc())
-        .limit(limit)
-    )
-
-    rows = session.exec(statement).all()
+    rows = queries.query_merchant_aggregates(session, user_id, range_, limit=limit)
     items: list[MerchantBreakdown] = []
     for row in rows:
-        merchant_name = str(row[0] or "Không rõ")
-        amount = Decimal(str(row[1])) if row[1] is not None else Decimal("0")
-        count = int(row[2] or 0)
+        amount = row.total_amount
+        count = row.transaction_count
         if total_spend > 0:
             percentage = float(round((amount / total_spend) * Decimal("100"), 2))
         else:
             percentage = 0.0
         items.append(
             MerchantBreakdown(
-                merchant_name=merchant_name,
+                merchant_name=row.merchant_name,
                 total_amount=amount,
                 transaction_count=count,
                 percentage=percentage,
@@ -384,14 +342,7 @@ def _query_transactions_for_range(
     user_id: int,
     range_: DateRange,
 ) -> list[Transaction]:
-    statement = (
-        select(Transaction)
-        .where(Transaction.user_id == user_id)
-        .where(Transaction.transaction_date >= range_.start)
-        .where(Transaction.transaction_date <= range_.end)
-        .order_by(col(Transaction.transaction_date).asc(), col(Transaction.id).asc())
-    )
-    return list(session.exec(statement).all())
+    return queries.query_transactions_for_range(session, user_id, range_)
 
 
 def _period_key(value: date, group_by: str) -> tuple[date, date]:
@@ -560,6 +511,149 @@ def compute_spending_anomalies(
     return anomalies
 
 
+@dataclass(frozen=True, slots=True)
+class ProductBreakdown:
+    """Một dòng trong top sản phẩm (line items đã confirm)."""
+
+    item_name: str
+    total_amount: Decimal
+    total_quantity: Decimal
+    line_count: int
+    percentage: float
+
+
+@dataclass(frozen=True, slots=True)
+class SellerBreakdown:
+    """Một dòng trong top người bán (invoices đã confirm)."""
+
+    seller_name: str
+    seller_tax_id: str | None
+    total_amount: Decimal
+    invoice_count: int
+    percentage: float
+
+
+@dataclass(frozen=True, slots=True)
+class VatSummary:
+    """Tổng hợp VAT từ invoices đã confirm trong range."""
+
+    subtotal_before_tax: Decimal
+    total_tax: Decimal
+    grand_total: Decimal
+    invoice_count: int
+    effective_tax_rate: float  # total_tax / subtotal × 100 (0 nếu subtotal=0)
+    top_sellers: list[SellerBreakdown]
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiptStatsSummary:
+    """Thống kê pipeline hóa đơn trong range."""
+
+    total_receipts: int
+    ready_count: int
+    failed_count: int
+    pending_count: int
+    with_invoice_count: int
+    confirmed_count: int
+    ocr_success_rate: float  # ready / total × 100 (0 nếu total=0)
+
+
+def compute_product_breakdown(
+    session: Session,
+    user_id: int,
+    range_: DateRange,
+    *,
+    limit: int = 20,
+) -> list[ProductBreakdown]:
+    """Top sản phẩm theo tổng chi, từ line items của receipt đã confirm."""
+    rows = queries.query_product_aggregates(session, user_id, range_, limit=limit)
+    total = sum((row.total_amount for row in rows), Decimal("0"))
+    items: list[ProductBreakdown] = []
+    for row in rows:
+        if total > 0:
+            percentage = float(round((row.total_amount / total) * Decimal("100"), 2))
+        else:
+            percentage = 0.0
+        items.append(
+            ProductBreakdown(
+                item_name=row.item_name,
+                total_amount=row.total_amount,
+                total_quantity=row.total_quantity,
+                line_count=row.line_count,
+                percentage=percentage,
+            ),
+        )
+    return items
+
+
+def compute_vat_summary(
+    session: Session,
+    user_id: int,
+    range_: DateRange,
+    *,
+    sellers_limit: int = 10,
+) -> VatSummary:
+    """Tổng hợp VAT + top người bán từ invoices đã confirm trong range."""
+    totals = queries.query_vat_totals(session, user_id, range_)
+    seller_rows = queries.query_seller_aggregates(
+        session, user_id, range_, limit=sellers_limit,
+    )
+    seller_total = sum((row.total_amount for row in seller_rows), Decimal("0"))
+    top_sellers: list[SellerBreakdown] = []
+    for row in seller_rows:
+        if seller_total > 0:
+            percentage = float(round((row.total_amount / seller_total) * Decimal("100"), 2))
+        else:
+            percentage = 0.0
+        top_sellers.append(
+            SellerBreakdown(
+                seller_name=row.seller_name,
+                seller_tax_id=row.seller_tax_id,
+                total_amount=row.total_amount,
+                invoice_count=row.invoice_count,
+                percentage=percentage,
+            ),
+        )
+
+    if totals.subtotal_before_tax > 0:
+        effective_rate = float(
+            round((totals.total_tax / totals.subtotal_before_tax) * Decimal("100"), 2),
+        )
+    else:
+        effective_rate = 0.0
+
+    return VatSummary(
+        subtotal_before_tax=totals.subtotal_before_tax,
+        total_tax=totals.total_tax,
+        grand_total=totals.grand_total,
+        invoice_count=totals.invoice_count,
+        effective_tax_rate=effective_rate,
+        top_sellers=top_sellers,
+    )
+
+
+def compute_receipt_stats(
+    session: Session,
+    user_id: int,
+    range_: DateRange,
+) -> ReceiptStatsSummary:
+    """Thống kê pipeline hóa đơn (upload/OCR) trong range."""
+    stats = queries.query_receipt_stats(session, user_id, range_)
+    if stats.total_receipts > 0:
+        success_rate = float(round((stats.ready_count / stats.total_receipts) * 100, 2))
+    else:
+        success_rate = 0.0
+    return ReceiptStatsSummary(
+        total_receipts=stats.total_receipts,
+        ready_count=stats.ready_count,
+        failed_count=stats.failed_count,
+        pending_count=stats.pending_count,
+        with_invoice_count=stats.with_invoice_count,
+        confirmed_count=stats.confirmed_count,
+        ocr_success_rate=success_rate,
+    )
+
+
 __all__ = [
     "DEFAULT_RECENT_TRANSACTIONS_LIMIT",
     "DEFAULT_TOP_CATEGORIES_LIMIT",
@@ -568,13 +662,20 @@ __all__ = [
     "CalendarDay",
     "MerchantBreakdown",
     "PeriodTotals",
+    "ProductBreakdown",
+    "ReceiptStatsSummary",
     "RecentTransactionItem",
+    "SellerBreakdown",
     "SpendingAnomaly",
     "TrendPoint",
+    "VatSummary",
     "compute_category_breakdown",
     "compute_calendar_days",
     "compute_merchant_breakdown",
+    "compute_product_breakdown",
+    "compute_receipt_stats",
     "compute_spending_anomalies",
     "compute_spending_trends",
     "compute_summary",
+    "compute_vat_summary",
 ]

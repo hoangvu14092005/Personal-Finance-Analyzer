@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { DragEvent, FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { FileText, RefreshCw, UploadCloud } from "lucide-react";
+import { CheckCircle2, FileText, RefreshCw, UploadCloud, XCircle } from "lucide-react";
 
 import { getMe } from "@/lib/auth-api";
 import { getReceiptStatus, uploadReceipt } from "@/lib/receipts-api";
@@ -15,10 +15,26 @@ import {
   DisplayLg,
 } from "@/components/ui";
 
-type FlowState = "idle" | "uploading" | "processing" | "ready" | "failed";
+// OCR llm_vision gọi LLM nhiều lần nên có thể chậm. Cho phép chờ tới ~3 phút.
+const POLL_INTERVAL_MS = 2500;
+const MAX_POLL_ATTEMPTS = 72;
+const MAX_FILES = 10;
 
-const POLL_INTERVAL_MS = 2000;
-const MAX_POLL_ATTEMPTS = 15;
+type ItemState =
+  | "queued"
+  | "uploading"
+  | "processing"
+  | "ready"
+  | "failed"
+  | "slow";
+
+interface UploadItem {
+  id: string; // local key
+  file: File;
+  state: ItemState;
+  receiptId: number | null;
+  message: string;
+}
 
 const FLOW_STEPS = [
   { key: "upload", label: "Tải lên", detail: "Lưu ảnh/PDF hóa đơn" },
@@ -32,14 +48,16 @@ function formatFileSize(file: File): string {
   return `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function makeKey(file: File, index: number): string {
+  return `${file.name}-${file.size}-${file.lastModified}-${index}-${Date.now()}`;
+}
+
 export default function ReceiptUploadPage() {
   const router = useRouter();
 
   const [authReady, setAuthReady] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [flowState, setFlowState] = useState<FlowState>("idle");
-  const [message, setMessage] = useState("Chọn hóa đơn để upload.");
-  const [receiptId, setReceiptId] = useState<number | null>(null);
+  const [items, setItems] = useState<UploadItem[]>([]);
+  const [running, setRunning] = useState(false);
   const [dragActive, setDragActive] = useState(false);
 
   useEffect(() => {
@@ -57,92 +75,143 @@ export default function ReceiptUploadPage() {
     };
   }, [router]);
 
-  const canSubmit = useMemo(
-    () => selectedFile !== null && flowState !== "uploading" && flowState !== "processing",
-    [selectedFile, flowState],
-  );
+  const summary = useMemo(() => {
+    return {
+      total: items.length,
+      ready: items.filter((i) => i.state === "ready").length,
+      failed: items.filter((i) => i.state === "failed").length,
+      slow: items.filter((i) => i.state === "slow").length,
+    };
+  }, [items]);
 
-  const pollUntilReady = async (id: number) => {
+  const allDone =
+    items.length > 0 &&
+    items.every((i) => ["ready", "failed", "slow"].includes(i.state));
+
+  const addFiles = (files: FileList | File[]) => {
+    const incoming = Array.from(files);
+    setItems((prev) => {
+      const room = Math.max(0, MAX_FILES - prev.length);
+      const slice = incoming.slice(0, room);
+      const next = slice.map((file, idx) => ({
+        id: makeKey(file, prev.length + idx),
+        file,
+        state: "queued" as ItemState,
+        receiptId: null,
+        message: "Chờ tải lên",
+      }));
+      return [...prev, ...next];
+    });
+  };
+
+  const patchItem = (id: string, patch: Partial<UploadItem>) => {
+    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+  };
+
+  const removeItem = (id: string) => {
+    setItems((prev) => prev.filter((i) => i.id !== id));
+  };
+
+  const pollUntilReady = async (id: string, receiptId: number) => {
     for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-
       try {
-        const statusBody = await getReceiptStatus(id);
+        const statusBody = await getReceiptStatus(receiptId);
         if (statusBody.status === "ready") {
-          setFlowState("ready");
-          setMessage("OCR sẵn sàng. Đang chuyển sang trang review...");
-          setTimeout(() => router.push(`/receipts/${id}/review`), 600);
+          patchItem(id, { state: "ready", message: "OCR xong, sẵn sàng kiểm tra" });
           return;
         }
         if (statusBody.status === "failed") {
-          setFlowState("failed");
-          setMessage(
-            statusBody.error_message || "OCR thất bại. Bạn có thể nhập tay.",
-          );
+          patchItem(id, {
+            state: "failed",
+            message: statusBody.error_message || "OCR thất bại. Có thể nhập tay.",
+          });
           return;
         }
-        setMessage(`Đang xử lý OCR... (lần ${attempt}/${MAX_POLL_ATTEMPTS})`);
+        patchItem(id, { state: "processing", message: "Đang xử lý hóa đơn..." });
       } catch (error) {
-        setFlowState("failed");
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : "Không lấy được trạng thái receipt.",
-        );
+        patchItem(id, {
+          state: "failed",
+          message:
+            error instanceof Error ? error.message : "Không lấy được trạng thái.",
+        });
         return;
       }
     }
+    // Vẫn đang xử lý (không phải lỗi) — worker llm_vision có thể chậm.
+    patchItem(id, {
+      state: "slow",
+      message: "OCR đang xử lý lâu hơn dự kiến, hóa đơn vẫn đang chạy.",
+    });
+  };
 
-    setFlowState("failed");
-    setMessage("OCR chưa sẵn sàng sau nhiều lần kiểm tra. Bạn có thể nhập tay.");
+  const processOne = async (item: UploadItem) => {
+    patchItem(item.id, { state: "uploading", message: "Đang tải lên..." });
+    try {
+      const result = await uploadReceipt(item.file);
+      if (result.status === "ready") {
+        patchItem(item.id, {
+          state: "ready",
+          receiptId: result.receipt_id,
+          message: "OCR xong, sẵn sàng kiểm tra",
+        });
+        return;
+      }
+      if (result.status === "uploaded") {
+        patchItem(item.id, {
+          state: "failed",
+          receiptId: result.receipt_id,
+          message: "OCR queue tạm không khả dụng. Thử lại sau.",
+        });
+        return;
+      }
+      patchItem(item.id, {
+        state: "processing",
+        receiptId: result.receipt_id,
+        message: "Đang xử lý hóa đơn...",
+      });
+      await pollUntilReady(item.id, result.receipt_id);
+    } catch (error) {
+      patchItem(item.id, {
+        state: "failed",
+        message: error instanceof Error ? error.message : "Upload thất bại",
+      });
+    }
   };
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedFile) return;
+    const queued = items.filter((i) => i.state === "queued");
+    if (queued.length === 0) return;
 
-    setFlowState("uploading");
-    setMessage("Đang upload hóa đơn...");
-    setReceiptId(null);
-
-    try {
-      const result = await uploadReceipt(selectedFile);
-      setReceiptId(result.receipt_id);
-
-      if (result.status === "ready") {
-        setFlowState("ready");
-        setMessage("OCR đã có sẵn. Đang chuyển sang trang review...");
-        setTimeout(
-          () => router.push(`/receipts/${result.receipt_id}/review`),
-          400,
-        );
-        return;
-      }
-
-      if (result.status === "uploaded") {
-        setFlowState("failed");
-        setMessage(
-          "OCR queue tạm không khả dụng. Bạn có thể nhập tay hoặc thử upload lại.",
-        );
-        return;
-      }
-
-      setFlowState("processing");
-      setMessage(
-        `Upload thành công. Đang chờ OCR (receipt #${result.receipt_id})...`,
-      );
-      await pollUntilReady(result.receipt_id);
-    } catch (error) {
-      setFlowState("failed");
-      setMessage(error instanceof Error ? error.message : "Upload thất bại");
+    setRunning(true);
+    // Upload tuần tự từng file (worker xử lý OCR song song ở backend).
+    for (const item of queued) {
+      // Lấy bản mới nhất của item (state có thể đã đổi).
+      await processOne(item);
     }
+    setRunning(false);
+
+    // Nếu chỉ có 1 file và xong (ready) → nhảy thẳng tới review cho nhanh.
+    setItems((current) => {
+      const readyOnes = current.filter((i) => i.state === "ready" && i.receiptId);
+      if (current.length === 1 && readyOnes.length === 1 && readyOnes[0].receiptId) {
+        router.push(`/receipts/${readyOnes[0].receiptId}/review`);
+      }
+      return current;
+    });
   };
 
-  const onDropFile = (event: DragEvent<HTMLLabelElement>) => {
+  const recheck = async (item: UploadItem) => {
+    if (item.receiptId === null) return;
+    patchItem(item.id, { state: "processing", message: "Đang kiểm tra lại..." });
+    await pollUntilReady(item.id, item.receiptId);
+  };
+
+  const onDropFiles = (event: DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
     setDragActive(false);
-    const file = event.dataTransfer.files?.[0];
-    if (file) setSelectedFile(file);
+    if (event.dataTransfer.files?.length) addFiles(event.dataTransfer.files);
   };
 
   if (!authReady) {
@@ -153,12 +222,7 @@ export default function ReceiptUploadPage() {
     );
   }
 
-  const severity: "info" | "success" | "warning" =
-    flowState === "ready"
-      ? "success"
-      : flowState === "failed"
-        ? "warning"
-        : "info";
+  const queuedCount = items.filter((i) => i.state === "queued").length;
 
   return (
     <div className="space-y-6">
@@ -167,7 +231,7 @@ export default function ReceiptUploadPage() {
           <div className="max-w-3xl">
             <DisplayLg>Tự Động Trích Xuất Hóa Đơn (OCR Scan)</DisplayLg>
             <p className="mt-0.5 text-sm text-ash">
-              Tải ảnh hóa đơn lên để AI bóc tách chi tiết từng sản phẩm, ngày mua và tự động ghi sổ tài chính nhanh chóng.
+              Tải một hoặc nhiều hóa đơn lên để AI bóc tách chi tiết và tự động ghi sổ tài chính.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -206,7 +270,7 @@ export default function ReceiptUploadPage() {
               }}
               onDragOver={(event) => event.preventDefault()}
               onDragLeave={() => setDragActive(false)}
-              onDrop={onDropFile}
+              onDrop={onDropFiles}
               className={`block cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center transition-colors ${
                 dragActive
                   ? "border-accent-green bg-accent-green-soft"
@@ -215,47 +279,54 @@ export default function ReceiptUploadPage() {
             >
               <input
                 type="file"
+                multiple
                 accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf"
-                onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+                onChange={(event) => {
+                  if (event.target.files?.length) addFiles(event.target.files);
+                  event.target.value = "";
+                }}
                 className="sr-only"
               />
               <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-accent-green-soft text-body-strong text-accent-green">
-                {flowState === "processing" || flowState === "uploading" ? (
+                {running ? (
                   <RefreshCw className="h-6 w-6 animate-spin" aria-hidden />
-                ) : selectedFile ? (
-                  <FileText className="h-6 w-6" aria-hidden />
                 ) : (
                   <UploadCloud className="h-6 w-6" aria-hidden />
                 )}
               </span>
               <span className="mt-4 block text-heading-sm-mixed text-ink">
-                Kéo thả hóa đơn vào đây hoặc click để chọn file
+                Kéo thả nhiều hóa đơn vào đây hoặc click để chọn file
               </span>
               <span className="mt-2 block text-body-sm text-mute">
-                Hỗ trợ JPG, PNG, PDF. AI sẽ bóc tách hóa đơn và chuyển sang màn kiểm tra.
+                Hỗ trợ JPG, PNG, PDF. Tối đa {MAX_FILES} hóa đơn mỗi lần.
               </span>
-              {selectedFile ? (
-                <span className="mx-auto mt-4 flex max-w-xl items-center justify-between gap-3 rounded-xl border border-hairline-soft bg-surface-card px-4 py-3 text-left">
-                  <span className="min-w-0">
-                    <span className="block truncate text-body-strong text-ink">{selectedFile.name}</span>
-                    <span className="block text-caption-sm text-mute">{formatFileSize(selectedFile)} · sẵn sàng tải lên</span>
-                  </span>
-                  <span className="rounded-md bg-accent-green-soft px-2 py-1 text-caption-xs text-accent-green">Đã chọn</span>
-                </span>
-              ) : null}
             </label>
 
+            {items.length > 0 ? (
+              <ul className="space-y-2">
+                {items.map((item) => (
+                  <UploadRow
+                    key={item.id}
+                    item={item}
+                    onRemove={() => removeItem(item.id)}
+                    onRecheck={() => void recheck(item)}
+                    disabled={running}
+                  />
+                ))}
+              </ul>
+            ) : null}
+
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit" variant="primary" disabled={!canSubmit}>
-                {flowState === "uploading"
-                  ? "Đang upload..."
-                  : flowState === "processing"
-                    ? "Đang xử lý OCR..."
+              <Button type="submit" variant="primary" disabled={running || queuedCount === 0}>
+                {running
+                  ? "Đang xử lý..."
+                  : queuedCount > 0
+                    ? `Tải lên và quét OCR (${queuedCount})`
                     : "Tải lên và quét OCR"}
               </Button>
-              {receiptId && flowState === "ready" ? (
-                <Link href={`/receipts/${receiptId}/review`}>
-                  <Button type="button" variant="secondary">Mở màn kiểm tra</Button>
+              {allDone && summary.ready > 0 ? (
+                <Link href="/receipts">
+                  <Button type="button" variant="secondary">Xem danh sách hóa đơn</Button>
                 </Link>
               ) : null}
             </div>
@@ -263,33 +334,99 @@ export default function ReceiptUploadPage() {
         </Card>
 
         <aside className="space-y-4 xl:col-span-4">
-          <CalloutBanner severity={severity} title={`Trạng thái: ${flowState.toUpperCase()}`}>
-            {message}
-            {receiptId ? ` (Receipt ID: ${receiptId})` : null}
+          <CalloutBanner
+            severity={summary.failed > 0 ? "warning" : allDone ? "success" : "info"}
+            title={`Hóa đơn: ${summary.total} · Xong: ${summary.ready}`}
+          >
+            {items.length === 0
+              ? "Chọn một hoặc nhiều hóa đơn để bắt đầu."
+              : running
+                ? "Đang xử lý hóa đơn..."
+                : allDone
+                  ? `Hoàn tất: ${summary.ready} sẵn sàng, ${summary.failed} lỗi, ${summary.slow} đang chạy.`
+                  : "Sẵn sàng tải lên."}
           </CalloutBanner>
 
           <Card className="border-hairline-soft bg-surface-card">
             <p className="text-caption-xs font-bold uppercase tracking-wide text-mute">Cơ chế ghi sổ</p>
             <h2 className="mt-1 text-heading-sm-mixed text-ink">Kiểm tra trước khi đồng bộ</h2>
             <p className="mt-2 text-body-sm text-body">
-              Hóa đơn sau khi OCR sẽ mở màn kiểm tra. Bạn xác nhận xong thì hệ thống mới ghi vào sổ giao dịch.
+              Mỗi hóa đơn sau khi OCR xong sẽ chờ ở danh sách để bạn kiểm tra rồi mới ghi vào sổ giao dịch.
             </p>
           </Card>
-
-          {flowState === "failed" ? (
-            <Card className="border-accent-red/30 bg-accent-red-soft">
-              <p className="mb-2 text-body-strong text-ink">Không sẵn sàng review từ OCR</p>
-              <p className="text-body-sm text-body">
-                Bạn có thể{" "}
-                <Link href="/transactions/new" className="font-semibold text-link-teal hover:underline">
-                  nhập giao dịch thủ công
-                </Link>{" "}
-                hoặc thử upload lại.
-              </p>
-            </Card>
-          ) : null}
         </aside>
       </div>
     </div>
+  );
+}
+
+function stateMeta(state: ItemState): { label: string; tone: string } {
+  switch (state) {
+    case "ready":
+      return { label: "Sẵn sàng", tone: "text-accent-green" };
+    case "failed":
+      return { label: "Lỗi", tone: "text-accent-red" };
+    case "slow":
+      return { label: "Đang chạy", tone: "text-primary-active" };
+    case "uploading":
+      return { label: "Đang tải lên", tone: "text-link-blue" };
+    case "processing":
+      return { label: "Đang xử lý", tone: "text-link-blue" };
+    default:
+      return { label: "Chờ", tone: "text-mute" };
+  }
+}
+
+function UploadRow({
+  item,
+  onRemove,
+  onRecheck,
+  disabled,
+}: {
+  item: UploadItem;
+  onRemove: () => void;
+  onRecheck: () => void;
+  disabled: boolean;
+}) {
+  const meta = stateMeta(item.state);
+  const busy = item.state === "uploading" || item.state === "processing";
+  return (
+    <li className="flex items-center gap-3 rounded-xl border border-hairline-soft bg-surface-doc px-4 py-3">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-mute">
+        {item.state === "ready" ? (
+          <CheckCircle2 className="h-5 w-5 text-accent-green" aria-hidden />
+        ) : item.state === "failed" ? (
+          <XCircle className="h-5 w-5 text-accent-red" aria-hidden />
+        ) : busy ? (
+          <RefreshCw className="h-5 w-5 animate-spin" aria-hidden />
+        ) : (
+          <FileText className="h-5 w-5" aria-hidden />
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-body-sm font-semibold text-ink">{item.file.name}</p>
+        <p className="truncate text-caption-sm text-mute">
+          {formatFileSize(item.file)} · <span className={meta.tone}>{meta.label}</span>
+          {item.message ? ` · ${item.message}` : ""}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {item.state === "ready" && item.receiptId ? (
+          <Link href={`/receipts/${item.receiptId}/review`}>
+            <Button type="button" variant="secondary" size="sm">Kiểm tra</Button>
+          </Link>
+        ) : null}
+        {item.state === "slow" && item.receiptId ? (
+          <Button type="button" variant="secondary" size="sm" onClick={onRecheck}>
+            Kiểm tra lại
+          </Button>
+        ) : null}
+        {item.state === "queued" && !disabled ? (
+          <Button type="button" variant="tertiary" size="sm" onClick={onRemove}>
+            Bỏ
+          </Button>
+        ) : null}
+      </div>
+    </li>
   );
 }

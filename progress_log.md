@@ -2305,3 +2305,221 @@ Sau **mỗi lần update thành công**, AI phải append một entry mới vào
   - ENABLE_DEMO_LOGIN đã trả về false trong .env sau khi test.
   - Postgres dùng port 5434, API 8001 (khác mặc định) để tránh xung đột dự án khác trên máy. Nếu chạy máy khác có thể đổi lại 5433/8000.
   - 2 migration mới có guard idempotent (_has_table/_has_column) nên an toàn trên cả DB cũ lẫn DB sạch.
+
+### 2026-05-30 20:55 - G0 - End-to-end stack verification (worker + OCR flow + e2e)
+
+- Goal:
+  - Chạy hoàn chỉnh stack thật: worker OCR, luồng upload→confirm→transaction, Playwright e2e.
+- Files changed:
+  - backend/worker/README.md (lệnh chạy worker: thêm "tasks index_tasks")
+  - frontend/web/e2e/auth.spec.ts, dashboard.spec.ts, responsive-mobile.spec.ts (heading dashboard -> regex /^Chào mừng trở lại/)
+- What was implemented / verified:
+  - Worker chạy thật trên Redis + Postgres (OCR_PROVIDER=mock cho deterministic).
+  - Luồng lõi end-to-end XÁC NHẬN: login -> upload -> worker OCR -> READY -> draft (merchant/amount/currency/date đầy đủ) -> confirm -> Transaction #5 (source=invoice, has_invoice=True) -> Invoice 0000123 liên kết. Lần đầu pipeline OCR chạy trọn trên Postgres thật.
+  - Playwright e2e: 28/28 pass (sau khi sửa 3 spec assert tên user cũ).
+- BUG THẬT phát hiện trong G0:
+  - Worker khởi động theo README cũ (`taskiq worker worker_app:broker`) KHÔNG import module task -> process_ocr_job "is not found" -> job kẹt "processing" vĩnh viễn. Fix: chạy `worker_app:broker tasks index_tasks`. Đã sửa README.
+  - 3 e2e fail do assert heading "Chào mừng trở lại, Người dùng PFA!" (text cũ) — đã đổi sang regex vì dashboard giờ hiển thị tên user thật.
+- Validation:
+  - Smoke HTTP luồng OCR: tất cả bước trả đúng.
+  - Playwright: 25 pass ban đầu + 3 fixed = 28/28 pass (E2E_EXIT_0).
+- Pending / Next:
+  - G1: khép các stub thành thật (data export sinh file, account purge job, cải thiện categorization).
+  - G2: củng cố tầng dữ liệu BI (cache/snapshot aggregation, đồng nhất tiền tệ).
+  - G3: phát triển BI (descriptive -> diagnostic -> predictive -> conversational/RAG).
+- Risks / Notes:
+  - ENABLE_DEMO_LOGIN + PFA_SKIP_EMBEDDING đã trả về trạng thái mặc định an toàn trong .env.
+  - Worker test dùng OCR_PROVIDER=mock; luồng llm_vision thật chưa test trong phiên này (cần CHAT_LLM key + ảnh thật).
+  - Đã dọn toàn bộ file tạm + stop process nền.
+
+### 2026-05-30 21:40 - Task 9 (G1) - Verify OCR THẬT với provider llm_vision (không phải mock)
+
+- Goal:
+  - G0 chỉ test OCR với provider=mock. Task này verify provider `llm_vision` THẬT đọc được hóa đơn qua endpoint LLM của user (cx/gpt-5.5 @ localhost:20128).
+- Files changed: KHÔNG (chỉ verify, không sửa code production).
+- What was verified:
+  - Endpoint LLM reachable: POST /chat/completions trả 200, model cx/gpt-5.5 OK.
+  - Provider-level (LLMVisionOCRProvider, ảnh thật .tmp/ocr-real/receipt-provider-test.png, 18671 bytes PNG):
+    - extract_text -> provider=llm_vision, confidence=0.9, đọc đúng text thật: "HIGHLAND COFFEE / Receipt No: TST-0528 / Date: 2026-05-28 / Ca phe sua da 45000 / Banh mi ga 65000 / Tra dao cam sa 55000 / TOTAL 165000 VND".
+    - normalize_receipt -> merchant='HIGHLAND COFFEE' (KHÔNG phải "Mock Mart"), date=2026-05-28, total=165000 VND, 3 line items đúng giá.
+    - normalize_invoice -> invoice_number='TST-0528', seller='HIGHLAND COFFEE', issue_date=2026-05-28, grand_total=165000, 3 line items. (template_symbol/tax_id/vat None vì ảnh là receipt đơn giản, không phải hóa đơn VAT đầy đủ — đúng kỳ vọng.)
+  - Full pipeline THẬT (run_ocr_for_receipt: MinIO storage -> OCR llm_vision -> Postgres):
+    - upload ảnh vào MinIO -> tạo ReceiptUpload (UPLOADED) -> run_ocr_for_receipt -> "ready".
+    - Receipt: status=ready, ocr_status=succeeded, merchant='HIGHLAND COFFEE', total=165000.00, currency=VND, has_invoice=True.
+    - OcrResult: provider=llm_vision, confidence=0.9, normalized_payload đúng, raw_text lưu đầy đủ.
+    - 3 ReceiptLineItem + Invoice (TST-0528) + 3 InvoiceLineItem ghi DB đúng.
+    - Đã dọn sạch test rows trong DB + object trong MinIO sau khi verify.
+- Validation:
+  - Provider llm_vision hoạt động đúng từ A-Z trên ảnh thật, dữ liệu trích xuất là THẬT (không phải fake mock data).
+  - Pipeline lưu DB (OcrResult/Invoice/line items) + cache summary trên receipt_uploads chính xác.
+- Pending / Next:
+  - G1 còn lại: data export sinh file thật, account purge job, cải thiện categorization.
+  - G2: tầng dữ liệu BI (cache/snapshot aggregation, đồng nhất tiền tệ).
+  - G3: BI features (descriptive -> diagnostic -> predictive -> conversational/RAG).
+- Risks / Notes:
+  - .env giữ nguyên (ENABLE_DEMO_LOGIN=false, PFA_SKIP_EMBEDDING=0, OCR_PROVIDER=llm_vision) — không sửa.
+  - System Python là 3.10 (thiếu datetime.UTC); phải chạy test bằng backend/worker/.venv (Python 3.12). Lưu ý cho phiên sau.
+  - Đã dọn toàn bộ file tạm trong .tmp + stop process nền. Ảnh test thật .tmp/ocr-real/receipt-provider-test.png giữ lại.
+
+### 2026-05-31 00:30 - G1 - Categorization bằng LLM + CRUD categories (theo kế hoạch user duyệt)
+
+- Bối cảnh: User yêu cầu DỪNG tự ý làm, lên kế hoạch hỏi trước. Đã chốt:
+  Mục 1 (categorization) làm bằng LLM đồng bộ, BỎ luật từ khóa; Mục 2 (data export)
+  giữ nguyên; Mục 3 (account purge) để nguyên; Mục 4 dọn dẹp.
+- Quyết định user duyệt: 14 category hệ thống; chỉ gọi LLM khi allow_ai_data_processing=True;
+  cache kết quả LLM thành alias để không gọi lại; CRUD category làm cách dễ dùng nhất.
+
+- Files thay đổi:
+  - THÊM `backend/api/alembic/versions/c8d9e0f1a2b3_seed_system_categories.py`:
+    seed 14 category hệ thống (is_system=True, user_id=NULL), idempotent. Chain sau head b7c8d9e0f1a2.
+  - THÊM `backend/api/app/services/category_classifier.py`: LLM phân loại merchant
+    vào 1 category trong danh sách. httpx sync, timeout 15s, fail-soft (lỗi→None),
+    CHỐNG BỊA (chỉ nhận id nằm trong danh sách).
+  - SỬA `backend/api/app/services/category_suggestion.py`: thứ tự alias → legacy mapping
+    → LLM (chỉ khi allow_ai_data_processing) → None. Cache kết quả LLM thành alias source="llm".
+  - SỬA `backend/api/app/api/v1/categories.py` + `schemas/categories.py`: thêm
+    POST/PATCH/DELETE. Chặn sửa/xóa system category (403); category user khác (404);
+    trùng tên (409); xóa category → set transaction.category_id=NULL (không xóa transaction).
+  - XÓA `backend/api/app/services/category_rules.py` + `tests/test_category_rules.py` (bỏ keyword).
+  - Tests: viết lại `test_category_suggestion.py` (mock LLM: cache, AI tắt, mapping thắng LLM),
+    THÊM `test_category_classifier.py` (parse/chống bịa), THÊM test CRUD trong `test_categories_api.py`.
+
+- Validation:
+  - Full API suite PASS (305 test), ruff sạch, mypy 0 lỗi/94 files.
+  - Migration `alembic upgrade head` chạy OK trên Postgres thật, 14 category seed đúng.
+  - LLM phân loại THẬT trên endpoint user (cx/gpt-5.5): 6/6 đúng — Highlands→Cà phê & đồ uống,
+    Grab→Di chuyển, EVN→Hóa đơn & tiện ích, Shopee→Mua sắm, CGV→Giải trí, Long Châu→Sức khỏe & y tế.
+
+- Bài học quy trình: phải HỎI + lên kế hoạch trước khi code (user nhắc); đã sửa cách làm.
+- Notes: terminal foreground bị kẹt giữa chừng (lệnh multiline qua `python -c` trong cmd hỏng);
+  workaround = chạy script file qua background process. Đã stop hết process nền + dọn .tmp.
+- Pending: data export (giữ), account purge (giữ). G2 (BI data layer) là bước lớn tiếp theo.
+
+### 2026-05-31 01:30 - G2 - Mở rộng tầng dữ liệu BI + tầng query hợp nhất + VND-only (kế hoạch user duyệt)
+
+- Bối cảnh: User chỉ ra BI mới chỉ dùng mỗi `transactions`, còn nhiều nguồn dữ
+  liệu chưa khai thác; "real-time" = cập nhật ngay khi user confirm hóa đơn.
+  Quyết định đã chốt: làm cả 3 chiều mới (sản phẩm + VAT + thống kê hóa đơn);
+  real-time phương án (A) = nguồn sự thật là transaction đã confirm, query trực
+  tiếp (không cache); VND-only; gom tầng query hợp nhất; viết docs/.
+
+- Files thêm:
+  - `backend/api/app/services/analytics_queries.py`: TẦNG TRUY VẤN BI HỢP NHẤT.
+    Mọi query BI tập trung ở đây (transactions, product/line-items, VAT/invoices,
+    receipt stats). Chiều product/VAT lọc transaction_id IS NOT NULL (chỉ tính
+    dữ liệu đã confirm → khớp real-time phương án A).
+  - `docs/bi-architecture.md`: thiết kế tầng BI + ranh giới 4 cấp độ (descriptive
+    đã xong / diagnostic một phần / predictive + conversational thuộc G3).
+  - Tests: `test_analytics_g2.py` (products/tax/receipts-stats), test VND-only
+    trong `test_transactions_api.py`.
+
+- Files sửa:
+  - `analytics.py`: refactor dùng analytics_queries (không đổi hành vi cũ) +
+    thêm compute_product_breakdown / compute_vat_summary / compute_receipt_stats.
+  - `schemas/analytics.py`: thêm response cho 3 endpoint mới.
+  - `api/v1/analytics.py`: thêm GET /analytics/products, /analytics/tax,
+    /analytics/receipts-stats.
+  - VND-only: ép currency="VND" khi tạo/sửa transaction (transaction_workflow)
+    và confirm receipt (receipt_workflow). Invoice giữ currency riêng (chứng từ).
+
+- Validation:
+  - Full API suite PASS, ruff sạch, mypy 0 lỗi/95 files.
+  - Smoke tầng query trên Postgres THẬT (user admin): period_totals total=1.060.500/5tx;
+    products gom đúng theo món (cà phê sữa đá 89.000...); vat subtotal=125.000 tax=12.500
+    từ 1 invoice đã confirm; receipt_stats total=3 ready=2 confirmed=2. Số liệu khớp.
+
+- Pending / Next:
+  - G3: diagnostic sâu, predictive (dự báo chi tiêu / cảnh báo vượt ngân sách),
+    conversational/RAG nối chat vào tầng analytics_queries.
+- Notes: terminal foreground hay kẹt với lệnh phức tạp → chạy script qua background
+  process. Đã stop process nền + dọn .tmp.
+
+### 2026-05-31 02:30 - G3 - Diagnostic + Predictive + nối chatbot (phương án B, user duyệt)
+
+- Bối cảnh: User chọn phương án B (làm cả 3b refactor chat tools). Predictive dùng
+  deterministic run-rate (không ML). Thứ tự làm: Mục 2 -> 1 -> 3a -> 3b.
+
+- Files thêm:
+  - `app/services/forecast.py` (Mục 2 — predictive): dự báo chi cuối tháng theo
+    run-rate (đã chi/ngày × tổng ngày), cảnh báo budget will_exceed + ngày dự kiến
+    chạm budget. Deterministic, giải thích được.
+  - `app/services/diagnostics.py` (Mục 1 — diagnostic): phân rã thay đổi chi tiêu
+    vs kỳ trước theo category, drill-down merchant đóng góp chính.
+  - Tests: `test_analytics_g3.py` (diagnostics/forecast service + endpoint).
+
+- Files sửa:
+  - `analytics_queries.py`: thêm query_merchant_aggregates_for_category (drill-down),
+    query_daily_aggregates, và flag exclude_unknown cho query_merchant_aggregates
+    (bảo toàn hành vi chat tool cũ).
+  - `schemas/analytics.py` + `api/v1/analytics.py`: thêm GET /analytics/diagnostics
+    và GET /analytics/forecast.
+  - Chat (Mục 3a): `chat/queries.py` thêm get_product_breakdown, get_tax_summary,
+    diagnose_spending_change, forecast_month_spending; `chat/tools.py` đăng ký 4 tool.
+  - Chat (Mục 3b): refactor get_top_merchants + get_spending_by_day dùng
+    analytics_queries (bảo toàn hành vi: exclude_unknown=True cho merchants).
+  - `docs/bi-architecture.md`: cập nhật diagnostic/predictive đã có + chatbot tools.
+
+- Validation:
+  - Full API suite PASS, ruff sạch, mypy 0 lỗi/97 files.
+  - test_chat_queries.py (lưới an toàn cho 3b) PASS nguyên — hành vi chat tool không đổi.
+  - Smoke Postgres THẬT: diagnostics current=1.060.500 với 5 drivers; forecast
+    spent=923.000 projected=923.000 với 4 budget. Chạy đúng.
+
+- Lưu ý: Mục 3b là phần rủi ro nhất (đụng luồng chat đang chạy) — đã rào bằng
+  bảo toàn hành vi + test so sánh; test chat cũ xanh nguyên nên an toàn.
+- Đã stop process nền + dọn .tmp.
+
+ROADMAP: G0/G1/G2/G3 đã xong. Hệ thống giờ có đủ 4 cấp độ phân tích
+(descriptive/diagnostic/predictive/conversational) + chatbot khai thác được toàn bộ.
+
+### 2026-05-31 03:30 - Test toàn hệ thống (300+ ca) + fix UI markdown trợ lý
+
+- Bối cảnh: User yêu cầu tạo bộ kiểm thử bao phủ toàn hệ thống (backend + frontend),
+  chạy đến khi tất cả xanh; toàn quyền, không hỏi lại.
+- FIX UI: tin nhắn trợ lý tài chính hiển thị markdown thô (**đậm**, list). Đã cài
+  react-markdown@9 + remark-gfm@4, render assistant message qua ReactMarkdown
+  (.chat-markdown), thêm CSS bold/list/table/code trong globals.css. User message
+  vẫn plain text.
+- OCR: kiểm tra DB receipt_uploads — OCR llm_vision THẬT đang hoạt động (receipt
+  id=5 "QUAN AN THIEN TAN" succeeded). Chỉ 1 receipt cũ (id=2) kẹt processing từ
+  phiên worker chưa bật đúng — job mồ côi, không phải lỗi hiện tại.
+- Test bổ sung frontend (Playwright e2e), 9 spec mới: login-form, register-form,
+  navigation (8 màn), budgets-crud, transactions-interactions, receipts-interactions,
+  insights-interactions, analytics-interactions, chat-markdown.
+- Lỗi test phát hiện + sửa (đều là test-logic, không phải bug app):
+  1. Playwright route precedence: /budgets** nuốt /budgets/usage, /insights** nuốt
+     PATCH /insights/{id} → gom thành 1 dispatcher handler theo method/url.
+  2. Validation budget: HTML required chặn submit rỗng → fill "0" để trigger JS validate.
+  3. getByRole("button", {name:"Ẩn"}) khớp cả tab "Đã ẩn" → dùng exact:true.
+- Tài liệu: docs/test-catalog.md (danh mục test có cấu trúc + cách chạy + kết quả).
+- KẾT QUẢ CUỐI: 317 API + 15 worker + 75 e2e = 407 ca PASS, 0 fail.
+- Stack đang chạy nền: API :8001 (term 37), worker (term 36, llm_vision), demo login
+  bật (admin/1). Lưu ý: trả ENABLE_DEMO_LOGIN=false khi xong review.
+
+### 2026-05-31 14:55 - Tối ưu tốc độ OCR + upload nhiều hóa đơn + sửa UI poll
+
+- Nguyên nhân OCR chậm (đo từ log worker receipt 6): pipeline gọi LLM 3 lần TUẦN TỰ
+  (~54s) — extract_text (17s) → normalize_receipt (15s) → normalize_invoice (21s).
+  Bước 2+3 chỉ phụ thuộc raw_result của bước 1.
+- Đo thật: LLM endpoint xử lý SONG SONG được (2 call song song 5.8s vs tuần tự 11s).
+
+- TỐI ƯU backend (tasks.py run_ocr_for_receipt): chạy normalize_receipt +
+  normalize_invoice ĐỒNG THỜI qua ThreadPoolExecutor(max_workers=2). Không đổi
+  prompt, không gộp logic → an toàn, fail-soft giữ nguyên. Kết quả đo THẬT trên
+  LLM: 54s → 17.3s (cùng ảnh, merchant đọc đúng "HIGHLAND COFFEE").
+- Restart worker để nạp code mới (import tasks+index_tasks OK).
+
+- FIX UI upload (frontend đổi root nguyên nhân "FAILED" nhầm):
+  * Poll 30s → ~3 phút (72 × 2.5s); hết giờ KHÔNG báo FAILED mà chuyển trạng thái
+    "slow" (vẫn đang chạy) + nút "Kiểm tra lại" / "Mở màn kiểm tra".
+  * Thông báo gọn lại "Đang xử lý hóa đơn..." (bỏ "lần x/72" và Receipt ID khi đang xử lý).
+- UPLOAD NHIỀU HÓA ĐƠN: trang upload viết lại hỗ trợ chọn/kéo-thả nhiều file (tối đa
+  10), upload tuần tự, hiển thị tiến trình + trạng thái từng file (queued/uploading/
+  processing/ready/failed/slow), nút "Kiểm tra" mỗi hóa đơn xong, nút "Xem danh sách
+  hóa đơn" khi hoàn tất. 1 file ready → vẫn auto nhảy review như cũ.
+
+- Validation:
+  * Worker test_run_ocr_for_receipt PASS (song song hóa không phá vỡ).
+  * e2e mới receipt-upload-multi: 4 PASS.
+  * e2e receipt-review (regression): 3 PASS. eslint sạch.
+- Stack đang chạy: API :8001 (37), worker mới (45, OCR song song), frontend :3000 (44).

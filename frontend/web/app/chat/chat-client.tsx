@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bot, Send, Sparkles, Trash2 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { getMe } from "@/lib/auth-api";
 import {
@@ -282,13 +284,23 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-lg px-4 py-3 text-body-md whitespace-pre-wrap ${
+        className={`max-w-[85%] rounded-lg px-4 py-3 text-body-md ${
           isUser
-            ? "bg-ink text-on-dark"
+            ? "bg-ink text-on-dark whitespace-pre-wrap"
             : "bg-surface-card border border-hairline text-ink"
         }`}
       >
-        {message.content || (message.streaming ? "Đang trả lời..." : "")}
+        {isUser ? (
+          message.content || ""
+        ) : message.content ? (
+          <div className="chat-markdown">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {message.content}
+            </ReactMarkdown>
+          </div>
+        ) : (
+          message.streaming ? "Đang trả lời..." : ""
+        )}
         {message.streaming && message.content && (
           <span className="inline-block w-1.5 h-4 bg-mute animate-pulse ml-0.5 align-text-bottom" />
         )}

@@ -1,7 +1,7 @@
 """Data export/privacy APIs."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlmodel import Session
 
 from app.core.database import get_session
@@ -9,7 +9,7 @@ from app.dependencies.auth import get_current_user
 from app.models.entities import User
 from app.schemas.data_exports import DataExportCreate, DataExportResponse
 from app.services.audit import record_audit_event
-from app.services.data_exports import create_data_export, get_data_export
+from app.services.data_exports import create_data_export, get_data_export, load_export_archive
 
 router = APIRouter(prefix="/data", tags=["data"])
 
@@ -27,7 +27,7 @@ def post_data_export(
     current_user: User = Depends(get_current_user),
 ) -> DataExportResponse:
     user_id = _require_user_id(current_user)
-    response = create_data_export(user_id, payload)
+    response = create_data_export(session, user_id, payload)
     record_audit_event(
         session,
         user_id=user_id,
@@ -50,6 +50,27 @@ def get_data_export_status(
     if response is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Export not found")
     return response
+
+
+@router.get("/export/{export_id}/download")
+def download_data_export(
+    export_id: str,
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    user_id = _require_user_id(current_user)
+    archive = load_export_archive(user_id, export_id)
+    if archive is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Export file not found or expired",
+        )
+    return Response(
+        content=archive,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="pfa-export-{export_id}.zip"',
+        },
+    )
 
 
 @router.delete("/receipt-files", status_code=status.HTTP_409_CONFLICT)

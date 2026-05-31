@@ -203,15 +203,17 @@ export default function AnalyticsClient() {
                 </div>
                 <Badge tone="blue">{data.trends.points.length} điểm</Badge>
               </div>
-              <div className="flex h-56 items-end gap-2 border-b border-hairline-soft pb-3">
+              <div className="flex h-56 items-stretch gap-2 border-b border-hairline-soft pb-3">
                 {data.trends.points.length === 0 ? (
                   <p className="self-center text-body-sm text-mute">Chưa có giao dịch trong kỳ này.</p>
                 ) : (
                   data.trends.points.map((point) => {
-                    const height = Math.max(6, ((Number(point.amount) || 0) / trendMax) * 100);
+                    const height = Math.max(2, ((Number(point.amount) || 0) / trendMax) * 100);
                     return (
-                      <div key={`${point.period_start}-${point.period_end}`} className="flex min-w-8 flex-1 flex-col items-center gap-2">
-                        <div className="w-full rounded-sm bg-accent-blue" style={{ height: `${height}%` }} title={formatMoney(point.amount)} />
+                      <div key={`${point.period_start}-${point.period_end}`} className="flex min-w-8 flex-1 flex-col items-center justify-end gap-2">
+                        <div className="flex w-full flex-1 items-end">
+                          <div className="w-full rounded-sm bg-accent-blue transition-all" style={{ height: `${height}%` }} title={formatMoney(point.amount)} />
+                        </div>
                         <span className="text-[11px] text-mute">{formatDate(point.period_start).slice(0, 5)}</span>
                       </div>
                     );

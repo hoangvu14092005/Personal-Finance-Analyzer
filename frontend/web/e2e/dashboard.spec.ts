@@ -48,7 +48,7 @@ test.describe("Dashboard command center", () => {
     });
 
     await page.goto("/dashboard");
-    await expect(page.getByRole("heading", { name: "Chào mừng trở lại, Người dùng PFA!" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Chào mừng trở lại/ })).toBeVisible();
     await expect(page.getByText("400.000 VND")).toBeVisible();
     await expect(page.getByText("Highlands Coffee")).toBeVisible();
     await expect(page.getByText("Hóa đơn OCR cần được xác nhận thành giao dịch trước khi cộng vào báo cáo và ngân sách.")).toBeVisible();

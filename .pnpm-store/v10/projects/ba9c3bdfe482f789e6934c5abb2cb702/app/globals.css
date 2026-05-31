@@ -191,3 +191,77 @@
     font-size: 22px;
   }
 }
+
+/* ===========================================================
+ * Chat assistant markdown rendering.
+ * Assistant messages contain markdown (**bold**, lists, etc.);
+ * render with sensible spacing inside the chat bubble.
+ * =========================================================== */
+
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+.chat-markdown p {
+  margin: 0 0 0.5rem;
+}
+.chat-markdown strong {
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 0.25rem 0 0.5rem;
+  padding-left: 1.25rem;
+}
+.chat-markdown ul {
+  list-style: disc;
+}
+.chat-markdown ol {
+  list-style: decimal;
+}
+.chat-markdown li {
+  margin: 0.125rem 0;
+}
+.chat-markdown a {
+  color: var(--color-link-blue);
+  text-decoration: underline;
+}
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0.5rem 0 0.25rem;
+}
+.chat-markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--color-surface-doc);
+  padding: 0.1em 0.3em;
+  border-radius: var(--radius-sm);
+}
+.chat-markdown pre {
+  background: var(--color-surface-doc);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+.chat-markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+.chat-markdown table {
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+  font-size: 0.95em;
+}
+.chat-markdown th,
+.chat-markdown td {
+  border: 1px solid var(--color-hairline);
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+}

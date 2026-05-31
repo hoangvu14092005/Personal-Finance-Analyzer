@@ -19,13 +19,24 @@ from app.schemas.analytics import (
     AnalyticsBudgetsResponse,
     AnalyticsCalendarResponse,
     AnalyticsCategoriesResponse,
+    AnalyticsDiagnosticsResponse,
+    AnalyticsForecastResponse,
     AnalyticsInsightFeedResponse,
     AnalyticsMerchantsResponse,
+    AnalyticsProductsResponse,
+    AnalyticsReceiptStatsResponse,
+    AnalyticsTaxResponse,
     AnalyticsTrendsResponse,
     AnomalyResponse,
+    BudgetForecastResponse,
     CalendarDayResponse,
     CalendarLegendResponse,
+    CategoryDriverResponse,
     MerchantBreakdownResponse,
+    MerchantContributionResponse,
+    MonthSpendForecastResponse,
+    ProductBreakdownResponse,
+    SellerBreakdownResponse,
     TrendPointResponse,
 )
 from app.schemas.budgets import BudgetUsageResponse
@@ -43,9 +54,12 @@ from app.services.analytics import (
     compute_calendar_days,
     compute_category_breakdown,
     compute_merchant_breakdown,
+    compute_product_breakdown,
+    compute_receipt_stats,
     compute_spending_anomalies,
     compute_spending_trends,
     compute_summary,
+    compute_vat_summary,
 )
 from app.services.budgets import BudgetUsage, compute_budget_usage
 from app.services.date_ranges import (
@@ -55,6 +69,8 @@ from app.services.date_ranges import (
     previous_period,
     resolve_range,
 )
+from app.services.diagnostics import compute_spending_diagnostics
+from app.services.forecast import compute_forecast
 from app.services.insights import (
     generate_rule_based_insights,
     insight_to_payload,
@@ -67,6 +83,8 @@ MAX_TOP_CATEGORIES_LIMIT = 20
 MAX_RECENT_TRANSACTIONS_LIMIT = 50
 MAX_TOP_MERCHANTS_LIMIT = 20
 MAX_ANOMALIES_LIMIT = 20
+MAX_TOP_PRODUCTS_LIMIT = 50
+MAX_TOP_SELLERS_LIMIT = 20
 
 
 def _require_user_id(current_user: User) -> int:
@@ -386,6 +404,171 @@ def get_analytics_budgets(
         exceeded_count=sum(1 for usage in usages if usage.status == "exceeded"),
         warning_count=sum(1 for usage in usages if usage.status == "warning"),
         budgets=[_usage_response(usage) for usage in usages],
+    )
+
+
+@router.get("/products", response_model=AnalyticsProductsResponse)
+def get_analytics_products(
+    range: str = Query("30d"),  # noqa: A002
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    limit: int = Query(20, ge=1, le=MAX_TOP_PRODUCTS_LIMIT),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> AnalyticsProductsResponse:
+    """Top sản phẩm theo tổng chi, từ line items của hóa đơn đã confirm."""
+    user_id = _require_user_id(current_user)
+    preset, current_range = _resolve_requested_range(range, start_date, end_date)
+    products = compute_product_breakdown(session, user_id, current_range, limit=limit)
+    return AnalyticsProductsResponse(
+        range=_build_range_info(current_range, preset),
+        items=[
+            ProductBreakdownResponse(
+                item_name=product.item_name,
+                total_amount=product.total_amount,
+                total_quantity=product.total_quantity,
+                line_count=product.line_count,
+                percentage=product.percentage,
+            )
+            for product in products
+        ],
+    )
+
+
+@router.get("/tax", response_model=AnalyticsTaxResponse)
+def get_analytics_tax(
+    range: str = Query("30d"),  # noqa: A002
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    sellers_limit: int = Query(10, ge=1, le=MAX_TOP_SELLERS_LIMIT),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> AnalyticsTaxResponse:
+    """Tổng hợp VAT + top người bán từ hóa đơn đã confirm."""
+    user_id = _require_user_id(current_user)
+    preset, current_range = _resolve_requested_range(range, start_date, end_date)
+    summary = compute_vat_summary(session, user_id, current_range, sellers_limit=sellers_limit)
+    return AnalyticsTaxResponse(
+        range=_build_range_info(current_range, preset),
+        subtotal_before_tax=summary.subtotal_before_tax,
+        total_tax=summary.total_tax,
+        grand_total=summary.grand_total,
+        invoice_count=summary.invoice_count,
+        effective_tax_rate=summary.effective_tax_rate,
+        top_sellers=[
+            SellerBreakdownResponse(
+                seller_name=seller.seller_name,
+                seller_tax_id=seller.seller_tax_id,
+                total_amount=seller.total_amount,
+                invoice_count=seller.invoice_count,
+                percentage=seller.percentage,
+            )
+            for seller in summary.top_sellers
+        ],
+    )
+
+
+@router.get("/receipts-stats", response_model=AnalyticsReceiptStatsResponse)
+def get_analytics_receipts_stats(
+    range: str = Query("30d"),  # noqa: A002
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> AnalyticsReceiptStatsResponse:
+    """Thống kê pipeline hóa đơn (upload/OCR/confirm) trong range."""
+    user_id = _require_user_id(current_user)
+    preset, current_range = _resolve_requested_range(range, start_date, end_date)
+    stats = compute_receipt_stats(session, user_id, current_range)
+    return AnalyticsReceiptStatsResponse(
+        range=_build_range_info(current_range, preset),
+        total_receipts=stats.total_receipts,
+        ready_count=stats.ready_count,
+        failed_count=stats.failed_count,
+        pending_count=stats.pending_count,
+        with_invoice_count=stats.with_invoice_count,
+        confirmed_count=stats.confirmed_count,
+        ocr_success_rate=stats.ocr_success_rate,
+    )
+
+
+@router.get("/diagnostics", response_model=AnalyticsDiagnosticsResponse)
+def get_analytics_diagnostics(
+    range: str = Query("30d"),  # noqa: A002
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    top_drivers: int = Query(5, ge=1, le=10),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> AnalyticsDiagnosticsResponse:
+    """Phân rã nguyên nhân thay đổi chi tiêu so với kỳ trước (theo category + merchant)."""
+    user_id = _require_user_id(current_user)
+    preset, current_range = _resolve_requested_range(range, start_date, end_date)
+    previous_range = previous_period(current_range, preset)
+    diag = compute_spending_diagnostics(
+        session, user_id, current_range, previous_range, top_drivers=top_drivers,
+    )
+    return AnalyticsDiagnosticsResponse(
+        range=_build_range_info(current_range, preset),
+        previous_range=_build_range_info(previous_range, preset),
+        current_total=diag.current_total,
+        previous_total=diag.previous_total,
+        delta_amount=diag.delta_amount,
+        delta_percent=diag.delta_percent,
+        drivers=[
+            CategoryDriverResponse(
+                category_id=driver.category_id,
+                category_name=driver.category_name,
+                current_amount=driver.current_amount,
+                previous_amount=driver.previous_amount,
+                delta_amount=driver.delta_amount,
+                delta_percent=driver.delta_percent,
+                direction=driver.direction,
+                top_merchants=[
+                    MerchantContributionResponse(
+                        merchant_name=m.merchant_name,
+                        current_amount=m.current_amount,
+                        previous_amount=m.previous_amount,
+                        delta_amount=m.delta_amount,
+                    )
+                    for m in driver.top_merchants
+                ],
+            )
+            for driver in diag.drivers
+        ],
+    )
+
+
+@router.get("/forecast", response_model=AnalyticsForecastResponse)
+def get_analytics_forecast(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> AnalyticsForecastResponse:
+    """Dự báo chi tiêu cuối tháng + cảnh báo ngân sách theo run-rate hiện tại."""
+    user_id = _require_user_id(current_user)
+    forecast = compute_forecast(session, user_id)
+    return AnalyticsForecastResponse(
+        month=MonthSpendForecastResponse(
+            period_month=forecast.month.period_month,
+            days_elapsed=forecast.month.days_elapsed,
+            days_in_month=forecast.month.days_in_month,
+            spent_so_far=forecast.month.spent_so_far,
+            daily_run_rate=forecast.month.daily_run_rate,
+            projected_total=forecast.month.projected_total,
+        ),
+        budgets=[
+            BudgetForecastResponse(
+                category_id=b.category_id,
+                category_name=b.category_name,
+                budget_amount=b.budget_amount,
+                spent_so_far=b.spent_so_far,
+                projected_spend=b.projected_spend,
+                projected_percent=b.projected_percent,
+                status=b.status,
+                projected_exceed_date=b.projected_exceed_date,
+            )
+            for b in forecast.budgets
+        ],
     )
 
 

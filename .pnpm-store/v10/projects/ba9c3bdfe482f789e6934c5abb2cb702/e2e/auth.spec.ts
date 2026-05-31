@@ -73,6 +73,6 @@ test.describe("Auth flow", () => {
     await expect(page.getByRole("link", { name: "Tổng quan" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Tải hóa đơn lên (OCR)" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Danh sách giao dịch" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Chào mừng trở lại, Người dùng PFA!" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Chào mừng trở lại/ })).toBeVisible();
   });
 });

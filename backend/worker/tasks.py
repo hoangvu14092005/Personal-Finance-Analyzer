@@ -67,7 +67,11 @@ def _save_invoice(
         user_id=user_id,
         invoice_number=invoice_result.invoice_number,
         template_symbol=invoice_result.template_symbol,
-        issue_date=date_type.fromisoformat(invoice_result.issue_date) if invoice_result.issue_date else None,
+        issue_date=(
+            date_type.fromisoformat(invoice_result.issue_date)
+            if invoice_result.issue_date
+            else None
+        ),
         tax_lookup_code=invoice_result.tax_lookup_code,
         currency=invoice_result.currency,
         seller_name=invoice_result.seller_name,
@@ -82,7 +86,11 @@ def _save_invoice(
         grand_total=invoice_result.grand_total,
         amount_in_words=invoice_result.amount_in_words,
         digital_signature=invoice_result.digital_signature,
-        signing_date=date_type.fromisoformat(invoice_result.signing_date) if invoice_result.signing_date else None,
+        signing_date=(
+            date_type.fromisoformat(invoice_result.signing_date)
+            if invoice_result.signing_date
+            else None
+        ),
         lookup_link=invoice_result.lookup_link,
     )
     session.add(invoice)
@@ -91,7 +99,11 @@ def _save_invoice(
     # Create InvoiceLineItems
     for idx, item in enumerate(invoice_result.line_items):
         # Auto-calculate line_total when OCR returns None
-        line_total = item.line_total if item.line_total is not None else (item.quantity * item.unit_price)
+        line_total = (
+            item.line_total
+            if item.line_total is not None
+            else (item.quantity * item.unit_price)
+        )
         session.add(InvoiceLineItem(
             invoice_id=invoice.id,
             line_number=idx,
@@ -142,9 +154,18 @@ def run_ocr_for_receipt(
         except StorageNotFoundError as exc:
             raise RuntimeError(f"storage_key missing: {receipt.storage_key}") from exc
 
-        # Step 3: OCR
+        # Step 3: OCR — extract text once, then run the two normalize calls
+        # CONCURRENTLY (cả 2 chỉ phụ thuộc raw_result, LLM server chịu tải song
+        # song → cắt ~1 lượt gọi LLM khỏi đường tới hạn).
         raw_result = provider.extract_text(content, source_hint=receipt.storage_key)
-        normalized = provider.normalize_receipt(raw_result)
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            receipt_future = pool.submit(provider.normalize_receipt, raw_result)
+            invoice_future = pool.submit(provider.normalize_invoice, raw_result)
+            normalized = receipt_future.result()
+            invoice_result = invoice_future.result()
 
         payload = {
             "merchant": normalized.merchant,
@@ -209,8 +230,7 @@ def run_ocr_for_receipt(
                 ),
             )
 
-        # Step 4.6: Invoice extraction + save (new structured data)
-        invoice_result = provider.normalize_invoice(raw_result)
+        # Step 4.6: Invoice extraction + save (computed concurrently above in Step 3).
         _save_invoice(session, receipt_id, receipt.user_id, invoice_result)
 
         # Step 4.7: Cache document summary on receipt_uploads for retrieval.

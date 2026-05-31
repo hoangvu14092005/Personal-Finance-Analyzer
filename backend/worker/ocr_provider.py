@@ -241,7 +241,7 @@ Return ONLY the JSON object, no markdown fences, no commentary.
 Receipt text:
 """
 
-OCR_INVOICE_NORMALIZE_PROMPT = """Parse the following Vietnamese e-invoice (hóa đơn điện tử) text and return STRICT JSON:
+OCR_INVOICE_NORMALIZE_PROMPT = """Parse the following Vietnamese e-invoice text. Return STRICT JSON:
 {
   "invoice_number": "string or null",
   "template_symbol": "string or null (ký hiệu mẫu số)",

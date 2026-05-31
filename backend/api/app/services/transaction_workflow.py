@@ -134,7 +134,8 @@ def create_transaction_for_user(
         raw_merchant_name=payload.merchant_name,
         merchant_name=payload.merchant_name,
         amount=payload.amount,
-        currency=payload.currency,
+        # VND-only (G2): toàn hệ thống dùng VND, bỏ qua currency client gửi lên.
+        currency="VND",
         transaction_date=payload.transaction_date,
         note=payload.note,
         source=source,
@@ -266,6 +267,9 @@ def update_transaction_for_user(
 
     for field, value in update_data.items():
         setattr(transaction, field, value)
+
+    # VND-only (G2): luôn ép VND bất kể client gửi currency gì.
+    transaction.currency = "VND"
 
     if "merchant_name" in update_data:
         transaction.raw_merchant_name = transaction.merchant_name

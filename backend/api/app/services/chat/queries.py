@@ -478,32 +478,19 @@ def get_top_merchants(
 
     Returns dict với: merchants[], period.
     """
+    from app.services import analytics_queries as aq
+
     preset = _resolve_preset(date_range)
     range_ = resolve_range(preset)
 
-    statement = (
-        select(
-            Transaction.merchant_name,
-            func.sum(Transaction.amount).label("total"),
-            func.count(Transaction.id).label("count"),
-        )
-        .where(Transaction.user_id == user_id)
-        .where(Transaction.transaction_date >= range_.start)
-        .where(Transaction.transaction_date <= range_.end)
-        .where(Transaction.merchant_name.is_not(None))  # type: ignore[union-attr]
-        .where(Transaction.merchant_name != "")
-        .group_by(Transaction.merchant_name)
-        .order_by(func.sum(Transaction.amount).desc())
-        .limit(min(limit, 20))
+    rows = aq.query_merchant_aggregates(
+        session, user_id, range_, limit=min(limit, 20), exclude_unknown=True,
     )
-
-    rows = session.exec(statement).all()
-
     merchants = [
         {
-            "merchant_name": row[0],
-            "total_spend": _decimal_str(Decimal(str(row[1]))) if row[1] else "0.00",
-            "transaction_count": int(row[2] or 0),
+            "merchant_name": row.merchant_name,
+            "total_spend": _decimal_str(row.total_amount),
+            "transaction_count": row.transaction_count,
         }
         for row in rows
     ]
@@ -525,31 +512,19 @@ def get_spending_by_day(
 
     Returns dict với: days[], period, total.
     """
+    from app.services import analytics_queries as aq
+
     preset = _resolve_preset(date_range)
     range_ = resolve_range(preset)
 
-    statement = (
-        select(
-            Transaction.transaction_date,
-            func.sum(Transaction.amount).label("total"),
-            func.count(Transaction.id).label("count"),
-        )
-        .where(Transaction.user_id == user_id)
-        .where(Transaction.transaction_date >= range_.start)
-        .where(Transaction.transaction_date <= range_.end)
-        .group_by(Transaction.transaction_date)
-        .order_by(Transaction.transaction_date.asc())
-    )
-
-    rows = session.exec(statement).all()
-
+    rows = aq.query_daily_aggregates(session, user_id, range_)
     days = [
         {
-            "date": row[0].isoformat() if row[0] else None,
-            "total_spend": _decimal_str(Decimal(str(row[1]))) if row[1] else "0.00",
-            "transaction_count": int(row[2] or 0),
+            "date": day.isoformat(),
+            "total_spend": _decimal_str(total),
+            "transaction_count": count,
         }
-        for row in rows
+        for day, total, count in rows
     ]
 
     grand_total = sum((Decimal(str(d["total_spend"])) for d in days), Decimal("0"))
@@ -605,11 +580,163 @@ def get_recent_transactions(
     }
 
 
+def get_product_breakdown(
+    session: Session,
+    user_id: int,
+    *,
+    date_range: str = "this_month",
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Top sản phẩm/món theo tổng chi, từ line items hóa đơn đã confirm.
+
+    Dùng cho câu hỏi "tôi mua món gì nhiều nhất / chi cho sản phẩm nào".
+    """
+    from app.services.analytics import compute_product_breakdown
+
+    preset = _resolve_preset(date_range)
+    range_ = resolve_range(preset)
+    products = compute_product_breakdown(session, user_id, range_, limit=min(max(limit, 1), 50))
+    return {
+        "products": [
+            {
+                "item_name": p.item_name,
+                "total_amount": _decimal_str(p.total_amount),
+                "total_quantity": _decimal_str(p.total_quantity),
+                "line_count": p.line_count,
+                "percentage": p.percentage,
+            }
+            for p in products
+        ],
+        "period": f"{range_.start.isoformat()} to {range_.end.isoformat()}",
+        "currency": "VND",
+        "note": "Chỉ tính line items của hóa đơn đã xác nhận thành giao dịch.",
+    }
+
+
+def get_tax_summary(
+    session: Session,
+    user_id: int,
+    *,
+    date_range: str = "this_month",
+) -> dict[str, Any]:
+    """Tổng VAT đã trả + top người bán, từ hóa đơn đã confirm.
+
+    Dùng cho câu hỏi "tôi đã trả bao nhiêu thuế VAT / mua nhiều nhất ở đâu (theo MST)".
+    """
+    from app.services.analytics import compute_vat_summary
+
+    preset = _resolve_preset(date_range)
+    range_ = resolve_range(preset)
+    summary = compute_vat_summary(session, user_id, range_)
+    return {
+        "subtotal_before_tax": _decimal_str(summary.subtotal_before_tax),
+        "total_tax": _decimal_str(summary.total_tax),
+        "grand_total": _decimal_str(summary.grand_total),
+        "invoice_count": summary.invoice_count,
+        "effective_tax_rate": summary.effective_tax_rate,
+        "top_sellers": [
+            {
+                "seller_name": s.seller_name,
+                "seller_tax_id": s.seller_tax_id,
+                "total_amount": _decimal_str(s.total_amount),
+                "invoice_count": s.invoice_count,
+                "percentage": s.percentage,
+            }
+            for s in summary.top_sellers
+        ],
+        "period": f"{range_.start.isoformat()} to {range_.end.isoformat()}",
+        "currency": "VND",
+    }
+
+
+def diagnose_spending_change(
+    session: Session,
+    user_id: int,
+    *,
+    date_range: str = "this_month",
+) -> dict[str, Any]:
+    """Phân rã VÌ SAO chi tiêu thay đổi so với kỳ trước (category + merchant).
+
+    Dùng cho câu hỏi "vì sao tháng này tôi tiêu nhiều hơn / cái gì làm chi tăng".
+    """
+    from app.services.diagnostics import compute_spending_diagnostics
+
+    preset = _resolve_preset(date_range)
+    current = resolve_range(preset)
+    previous = previous_period(current, preset)
+    diag = compute_spending_diagnostics(session, user_id, current, previous)
+    return {
+        "current_total": _decimal_str(diag.current_total),
+        "previous_total": _decimal_str(diag.previous_total),
+        "delta_amount": _decimal_str(diag.delta_amount),
+        "delta_percent": diag.delta_percent,
+        "drivers": [
+            {
+                "category_name": d.category_name,
+                "current_amount": _decimal_str(d.current_amount),
+                "previous_amount": _decimal_str(d.previous_amount),
+                "delta_amount": _decimal_str(d.delta_amount),
+                "delta_percent": d.delta_percent,
+                "direction": d.direction,
+                "top_merchants": [
+                    {
+                        "merchant_name": m.merchant_name,
+                        "delta_amount": _decimal_str(m.delta_amount),
+                    }
+                    for m in d.top_merchants
+                ],
+            }
+            for d in diag.drivers
+        ],
+        "currency": "VND",
+    }
+
+
+def forecast_month_spending(
+    session: Session,
+    user_id: int,
+) -> dict[str, Any]:
+    """Dự báo chi cuối tháng + cảnh báo budget nào sắp vượt (run-rate).
+
+    Dùng cho câu hỏi "cuối tháng tôi tiêu hết bao nhiêu / có vượt ngân sách không".
+    """
+    from app.services.forecast import compute_forecast
+
+    forecast = compute_forecast(session, user_id)
+    return {
+        "period_month": forecast.month.period_month,
+        "days_elapsed": forecast.month.days_elapsed,
+        "days_in_month": forecast.month.days_in_month,
+        "spent_so_far": _decimal_str(forecast.month.spent_so_far),
+        "daily_run_rate": _decimal_str(forecast.month.daily_run_rate),
+        "projected_total": _decimal_str(forecast.month.projected_total),
+        "budgets": [
+            {
+                "category_name": b.category_name,
+                "budget_amount": _decimal_str(b.budget_amount),
+                "spent_so_far": _decimal_str(b.spent_so_far),
+                "projected_spend": _decimal_str(b.projected_spend),
+                "projected_percent": b.projected_percent,
+                "status": b.status,
+                "projected_exceed_date": (
+                    b.projected_exceed_date.isoformat() if b.projected_exceed_date else None
+                ),
+            }
+            for b in forecast.budgets
+        ],
+        "currency": "VND",
+    }
+
+
 __all__ = [
     "compare_periods",
+    "diagnose_spending_change",
+    "forecast_month_spending",
     "get_budget_status",
+    "get_product_breakdown",
     "get_recent_transactions",
     "get_spending_by_day",
+    "get_tax_summary",
     "get_top_merchants",
     "lookup_transaction_receipts",
     "query_spending_summary",

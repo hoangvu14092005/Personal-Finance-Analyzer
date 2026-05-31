@@ -400,3 +400,39 @@ class TestAssistantIntentRouting:
             classify_assistant_intent("Giao dịch Highlands hôm qua có hóa đơn không?")
             == AssistantIntent.TRANSACTION_RECEIPT_LOOKUP
         )
+
+
+class TestNewChatToolsG3:
+    """G3 Mục 3a: tool mới products/VAT/diagnose/forecast trên chat layer."""
+
+    @pytest.mark.usefixtures("_seed_transactions")
+    def test_diagnose_spending_change_returns_drivers(
+        self, db_session: Session, user_a: int,
+    ) -> None:
+        from app.services.chat.queries import diagnose_spending_change
+
+        result = diagnose_spending_change(db_session, user_a, date_range="this_month")
+        assert "drivers" in result
+        assert result["currency"] == "VND"
+
+    @pytest.mark.usefixtures("_seed_transactions")
+    def test_forecast_month_spending(self, db_session: Session, user_a: int) -> None:
+        from app.services.chat.queries import forecast_month_spending
+
+        result = forecast_month_spending(db_session, user_a)
+        assert "projected_total" in result
+        assert "budgets" in result
+
+    def test_get_tax_summary_empty(self, db_session: Session, user_a: int) -> None:
+        from app.services.chat.queries import get_tax_summary
+
+        result = get_tax_summary(db_session, user_a, date_range="this_month")
+        assert result["total_tax"] == "0.00"
+        assert result["top_sellers"] == []
+
+    def test_get_product_breakdown_empty(self, db_session: Session, user_a: int) -> None:
+        from app.services.chat.queries import get_product_breakdown
+
+        result = get_product_breakdown(db_session, user_a, date_range="this_month")
+        assert result["products"] == []
+        assert result["currency"] == "VND"

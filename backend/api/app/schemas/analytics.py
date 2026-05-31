@@ -121,17 +121,151 @@ class AnalyticsInsightFeedResponse(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
+class ProductBreakdownResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_name: str
+    total_amount: Decimal
+    total_quantity: Decimal
+    line_count: int = Field(ge=0)
+    percentage: float = Field(ge=0, le=100)
+
+
+class AnalyticsProductsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    range: RangeInfo
+    items: list[ProductBreakdownResponse]
+
+
+class SellerBreakdownResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    seller_name: str
+    seller_tax_id: str | None
+    total_amount: Decimal
+    invoice_count: int = Field(ge=0)
+    percentage: float = Field(ge=0, le=100)
+
+
+class AnalyticsTaxResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    range: RangeInfo
+    subtotal_before_tax: Decimal
+    total_tax: Decimal
+    grand_total: Decimal
+    invoice_count: int = Field(ge=0)
+    effective_tax_rate: float = Field(ge=0)
+    top_sellers: list[SellerBreakdownResponse]
+
+
+class AnalyticsReceiptStatsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    range: RangeInfo
+    total_receipts: int = Field(ge=0)
+    ready_count: int = Field(ge=0)
+    failed_count: int = Field(ge=0)
+    pending_count: int = Field(ge=0)
+    with_invoice_count: int = Field(ge=0)
+    confirmed_count: int = Field(ge=0)
+    ocr_success_rate: float = Field(ge=0, le=100)
+
+
+# --- Diagnostics (G3 Mục 1) ---
+
+
+class MerchantContributionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    merchant_name: str
+    current_amount: Decimal
+    previous_amount: Decimal
+    delta_amount: Decimal
+
+
+class CategoryDriverResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category_id: int | None
+    category_name: str
+    current_amount: Decimal
+    previous_amount: Decimal
+    delta_amount: Decimal
+    delta_percent: float | None
+    direction: str
+    top_merchants: list[MerchantContributionResponse]
+
+
+class AnalyticsDiagnosticsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    range: RangeInfo
+    previous_range: RangeInfo
+    current_total: Decimal
+    previous_total: Decimal
+    delta_amount: Decimal
+    delta_percent: float | None
+    drivers: list[CategoryDriverResponse]
+
+
+# --- Forecast (G3 Mục 2) ---
+
+
+class MonthSpendForecastResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    period_month: str
+    days_elapsed: int = Field(ge=0)
+    days_in_month: int = Field(ge=1)
+    spent_so_far: Decimal
+    daily_run_rate: Decimal
+    projected_total: Decimal
+
+
+class BudgetForecastResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category_id: int
+    category_name: str
+    budget_amount: Decimal
+    spent_so_far: Decimal
+    projected_spend: Decimal
+    projected_percent: float = Field(ge=0)
+    status: str
+    projected_exceed_date: date | None
+
+
+class AnalyticsForecastResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    month: MonthSpendForecastResponse
+    budgets: list[BudgetForecastResponse]
+
+
 __all__ = [
     "AnalyticsBudgetsResponse",
     "AnalyticsCategoriesResponse",
     "AnalyticsAnomaliesResponse",
     "AnalyticsCalendarResponse",
+    "AnalyticsDiagnosticsResponse",
+    "AnalyticsForecastResponse",
     "AnalyticsInsightFeedResponse",
     "AnalyticsMerchantsResponse",
+    "AnalyticsProductsResponse",
+    "AnalyticsReceiptStatsResponse",
+    "AnalyticsTaxResponse",
     "AnalyticsTrendsResponse",
     "AnomalyResponse",
+    "BudgetForecastResponse",
     "CalendarDayResponse",
     "CalendarLegendResponse",
+    "CategoryDriverResponse",
     "MerchantBreakdownResponse",
+    "MerchantContributionResponse",
+    "MonthSpendForecastResponse",
+    "ProductBreakdownResponse",
+    "SellerBreakdownResponse",
     "TrendPointResponse",
 ]

@@ -316,7 +316,9 @@ def confirm_receipt_as_transaction(
     merchant_name = payload.merchant_name or receipt.merchant_name or draft.merchant_name
     transaction_date = payload.transaction_date or receipt.receipt_date or draft.transaction_date
     amount = payload.amount or receipt.total_amount or draft.amount
-    currency = (payload.currency or receipt.currency or draft.currency or "VND").strip().upper()
+    # VND-only (G2): transaction luôn VND (nguồn sự thật tiền). Invoice giữ
+    # currency riêng (dữ liệu chứng từ) — không ép ở đây.
+    currency = "VND"
     category_id = payload.category_id or draft.suggested_category_id
     source = "invoice" if invoice is not None else "ocr"
 
@@ -324,7 +326,6 @@ def confirm_receipt_as_transaction(
         merchant_name = payload.merchant_name or invoice.seller_name or merchant_name
         transaction_date = payload.transaction_date or invoice.issue_date or transaction_date
         amount = payload.amount or invoice.grand_total or amount
-        currency = (payload.currency or invoice.currency or currency).strip().upper()
 
     if transaction_date is None:
         raise HTTPException(
