@@ -49,6 +49,25 @@ async function mockAppApi(page: Page) {
   await page.route(`${apiBase}/api/v1/analytics/insight-feed**`, async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ range: { preset: "30d", start: "2026-05-01", end: "2026-05-29", days: 29 }, hero: null, source: "transactions", meta: {}, insights: [insightPayload()] }) });
   });
+  const rMob = { preset: "30d", start: "2026-05-01", end: "2026-05-29", days: 29 };
+  await page.route(`${apiBase}/api/v1/analytics/products**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ range: rMob, items: [] }) });
+  });
+  await page.route(`${apiBase}/api/v1/analytics/tax**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ range: rMob, subtotal_before_tax: "0", total_tax: "0", grand_total: "0", invoice_count: 0, effective_tax_rate: 0, top_sellers: [] }) });
+  });
+  await page.route(`${apiBase}/api/v1/analytics/diagnostics**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ range: rMob, previous_range: rMob, current_total: "0", previous_total: "0", delta_amount: "0", delta_percent: null, drivers: [] }) });
+  });
+  await page.route(`${apiBase}/api/v1/analytics/forecast**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ month: { period_month: "2026-05", days_elapsed: 29, days_in_month: 31, spent_so_far: "0", daily_run_rate: "0", projected_total: "0" }, budgets: [] }) });
+  });
+  await page.route(`${apiBase}/api/v1/analytics/calendar**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ range: rMob, days: [], legend: { levels: {} } }) });
+  });
+  await page.route(`${apiBase}/api/v1/analytics/recurring**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ lookback_months: 6, fixed_monthly_estimate: "0", variable_last_month: "0", recurring_items: [] }) });
+  });
 
   await page.route(`${apiBase}/api/v1/receipts**`, async (route) => {
     await route.fulfill({
@@ -167,7 +186,7 @@ test.describe("Mobile responsive layout", () => {
 
   for (const [path, heading] of [
     ["/dashboard", /^Chào mừng trở lại/],
-    ["/analytics", "Phân tích chi tiết tiêu dùng"],
+    ["/analytics", "Phân tích chi tiêu"],
     ["/receipts", "Nhật ký danh sách hóa đơn tải lên"],
     ["/receipts/upload", "Tự Động Trích Xuất Hóa Đơn (OCR Scan)"],
     ["/transactions", "Sổ Nhật Ký Giao Dịch"],

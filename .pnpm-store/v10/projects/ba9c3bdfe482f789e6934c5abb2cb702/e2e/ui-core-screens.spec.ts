@@ -98,6 +98,26 @@ async function mockAnalytics(page: import("@playwright/test").Page) {
       }),
     });
   });
+  // Endpoints mới (Đợt 1) — mock để Promise.all không reject.
+  const r30 = { preset: "30d", start: "2026-05-01", end: "2026-05-29", days: 29 };
+  await page.route(`${apiBase}/api/v1/analytics/products**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ range: r30, items: [{ item_name: "Cà phê sữa đá", total_amount: "90000", total_quantity: "2", line_count: 2, percentage: 50 }] }) });
+  });
+  await page.route(`${apiBase}/api/v1/analytics/tax**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ range: r30, subtotal_before_tax: "100000", total_tax: "10000", grand_total: "110000", invoice_count: 1, effective_tax_rate: 10, top_sellers: [{ seller_name: "WinMart", seller_tax_id: "012345", total_amount: "110000", invoice_count: 1, percentage: 100 }] }) });
+  });
+  await page.route(`${apiBase}/api/v1/analytics/diagnostics**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ range: r30, previous_range: r30, current_total: "400000", previous_total: "300000", delta_amount: "100000", delta_percent: 33.3, drivers: [{ category_id: 1, category_name: "Ăn uống", current_amount: "240000", previous_amount: "180000", delta_amount: "60000", delta_percent: 33.3, direction: "increase", top_merchants: [] }] }) });
+  });
+  await page.route(`${apiBase}/api/v1/analytics/forecast**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ month: { period_month: "2026-05", days_elapsed: 29, days_in_month: 31, spent_so_far: "400000", daily_run_rate: "13793", projected_total: "427000" }, budgets: [] }) });
+  });
+  await page.route(`${apiBase}/api/v1/analytics/calendar**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ range: r30, days: [{ date: "2026-05-12", amount: "180000", transaction_count: 2, intensity: 3, top_category_name: "Ăn uống", is_unusual: false }], legend: { levels: {} } }) });
+  });
+  await page.route(`${apiBase}/api/v1/analytics/recurring**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ lookback_months: 6, fixed_monthly_estimate: "0", variable_last_month: "0", recurring_items: [] }) });
+  });
 }
 
 async function mockBudgets(page: import("@playwright/test").Page) {
@@ -249,10 +269,12 @@ test.describe("UI core screens API mapping", () => {
   test("analytics renders transaction-source metrics", async ({ page }) => {
     await mockAnalytics(page);
     await page.goto("/analytics");
-    await expect(page.getByRole("heading", { name: "Phân tích chi tiết tiêu dùng" })).toBeVisible();
-    await expect(page.getByText("400.000 VND")).toBeVisible();
-    await expect(page.getByText("Highlands Coffee").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Phân tích chi tiêu" })).toBeVisible();
+    await expect(page.getByText("400.000 VND").first()).toBeVisible();
     await expect(page.getByText("Chi tiêu cafe tăng mạnh")).toBeVisible();
+    // Merchants nằm trong tab Danh mục.
+    await page.getByRole("button", { name: "Danh mục" }).click();
+    await expect(page.getByText("Highlands Coffee").first()).toBeVisible();
   });
 
   test("budgets renders usage from transactions", async ({ page }) => {

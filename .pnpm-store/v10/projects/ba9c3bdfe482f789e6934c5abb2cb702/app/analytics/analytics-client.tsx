@@ -46,10 +46,17 @@ import {
   getAnalyticsTax,
   getAnalyticsTrends,
 } from "@/lib/analytics-api";
-import type { CategoryBreakdown, RangePreset } from "@/lib/dashboard-api";
-import { RANGE_LABELS, RANGE_PRESETS } from "@/lib/dashboard-api";
+import type { CategoryBreakdown, RangeInfo, RangePreset } from "@/lib/dashboard-api";
 import type { Insight } from "@/lib/insights-api";
 import { Badge, Button, Card, PillTab } from "@/components/ui";
+import { categoryColor } from "@/lib/chart-colors";
+import {
+  CategoryDonut,
+  HorizontalBarChart,
+  TrendAreaChart,
+  type DonutDatum,
+  type HBarDatum,
+} from "./analytics-charts";
 
 const TABS = [
   { key: "overview", label: "Tổng quan" },
@@ -60,6 +67,48 @@ const TABS = [
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
+
+type SectionKey =
+  | "categories" | "trends" | "merchants" | "anomalies" | "insights"
+  | "products" | "tax" | "diagnostics" | "forecast" | "calendar" | "recurring";
+
+type PromiseSettledStatus = "fulfilled" | "rejected";
+
+function emptyRange(preset: RangePreset): RangeInfo {
+  const today = new Date();
+  const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { preset, start: iso(today), end: iso(today), days: 1 };
+}
+
+const MONTH_NAMES = [
+  "Tháng 1", "Tháng 2", "Tháng 3", "Tháng 4", "Tháng 5", "Tháng 6",
+  "Tháng 7", "Tháng 8", "Tháng 9", "Tháng 10", "Tháng 11", "Tháng 12",
+];
+
+/** 12 tháng gần nhất (kể cả tháng hiện tại) cho dropdown chọn tháng. */
+function recentMonths(count = 12): Array<{ value: string; label: string }> {
+  const out: Array<{ value: string; label: string }> = [];
+  const today = new Date();
+  for (let i = 0; i < count; i += 1) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    out.push({ value, label: `${MONTH_NAMES[d.getMonth()]}/${d.getFullYear()}` });
+  }
+  return out;
+}
+
+/** Biên đầu/cuối của 1 tháng "YYYY-MM" dưới dạng ISO date. */
+function monthBounds(ym: string): { start: string; end: string } {
+  const [y, m] = ym.split("-").map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  return { start: `${ym}-01`, end: `${ym}-${String(lastDay).padStart(2, "0")}` };
+}
+
+/** Tham số custom range đúng tên API: start_date / end_date. */
+function monthBoundsParams(ym: string): { start_date: string; end_date: string } {
+  const { start, end } = monthBounds(ym);
+  return { start_date: start, end_date: end };
+}
 
 type AnalyticsState = {
   categories: CategoryBreakdown[];
@@ -86,10 +135,6 @@ function formatDate(value: string): string {
   return y && m && d ? `${d}/${m}/${y}` : value;
 }
 
-function maxAmount(values: string[]): number {
-  return Math.max(1, ...values.map((value) => Number(value) || 0));
-}
-
 function sumAmounts(values: string[]): number {
   return values.reduce((sum, value) => sum + (Number(value) || 0), 0);
 }
@@ -105,14 +150,20 @@ function categoryIcon(name: string): LucideIcon {
   return Sparkles;
 }
 
+function currentMonth(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 export default function AnalyticsClient() {
   const router = useRouter();
   const [authReady, setAuthReady] = useState(false);
-  const [range, setRange] = useState<RangePreset>("30d");
+  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonth());
   const [tab, setTab] = useState<TabKey>("overview");
   const [data, setData] = useState<AnalyticsState | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState<Set<SectionKey>>(new Set());
+  const [fatalError, setFatalError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,47 +182,70 @@ export default function AnalyticsClient() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
-    try {
-      const [categories, trends, merchants, anomalies, insightFeed, products, tax, diagnostics, forecast, calendar, recurring] = await Promise.all([
-        getAnalyticsCategories({ range, limit: 8 }),
-        getAnalyticsTrends({ range, group_by: range === "30d" ? "week" : "day" }),
-        getAnalyticsMerchants({ range, limit: 8 }),
-        getAnalyticsAnomalies({ range, limit: 6 }),
-        getAnalyticsInsightFeed({ range, limit: 4, auto_generate: true }),
-        getAnalyticsProducts({ range, limit: 8 }),
-        getAnalyticsTax({ range, sellers_limit: 6 }),
-        getAnalyticsDiagnostics({ range, top_drivers: 5 }),
-        getAnalyticsForecast(),
-        getAnalyticsCalendar({ range }),
-        getAnalyticsRecurring({ lookback_months: 6 }),
-      ]);
-      setData({
-        categories: categories.items,
-        trends,
-        merchants,
-        anomalies,
-        insights: insightFeed.insights,
-        products,
-        tax,
-        diagnostics,
-        forecast,
-        calendar,
-        recurring,
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Không thể tải dữ liệu phân tích");
-    } finally {
+    setFatalError(null);
+    const range: RangePreset = "custom";
+    const rangeMeta = emptyRange(range);
+    const q = { range, ...monthBoundsParams(selectedMonth) };
+    const groupBy = "day";
+    const results = await Promise.allSettled([
+      getAnalyticsCategories({ ...q, limit: 8 }),
+      getAnalyticsTrends({ ...q, group_by: groupBy }),
+      getAnalyticsMerchants({ ...q, limit: 8 }),
+      getAnalyticsAnomalies({ ...q, limit: 6 }),
+      getAnalyticsInsightFeed({ ...q, limit: 4, auto_generate: true }),
+      getAnalyticsProducts({ ...q, limit: 8 }),
+      getAnalyticsTax({ ...q, sellers_limit: 6 }),
+      getAnalyticsDiagnostics({ ...q, top_drivers: 5 }),
+      getAnalyticsForecast(),
+      getAnalyticsCalendar({ ...q }),
+      getAnalyticsRecurring({ lookback_months: 6 }),
+    ]);
+    const [categories, trends, merchants, anomalies, insightFeed, products, tax, diagnostics, forecast, calendar, recurring] = results;
+
+    const nextFailed = new Set<SectionKey>();
+    const mark = (key: SectionKey, r: PromiseSettledStatus): void => {
+      if (r === "rejected") nextFailed.add(key);
+    };
+    mark("categories", categories.status);
+    mark("trends", trends.status);
+    mark("merchants", merchants.status);
+    mark("anomalies", anomalies.status);
+    mark("insights", insightFeed.status);
+    mark("products", products.status);
+    mark("tax", tax.status);
+    mark("diagnostics", diagnostics.status);
+    mark("forecast", forecast.status);
+    mark("calendar", calendar.status);
+    mark("recurring", recurring.status);
+
+    // Nếu TẤT CẢ fail → lỗi mạng/phiên, hiện lỗi toàn trang.
+    if (nextFailed.size === results.length) {
+      setFatalError("Không thể tải dữ liệu phân tích. Vui lòng thử lại.");
       setLoading(false);
+      return;
     }
-  }, [range]);
+
+    setData({
+      categories: categories.status === "fulfilled" ? categories.value.items : [],
+      trends: trends.status === "fulfilled" ? trends.value : { range: rangeMeta, group_by: "day", points: [] },
+      merchants: merchants.status === "fulfilled" ? merchants.value : { range: rangeMeta, items: [] },
+      anomalies: anomalies.status === "fulfilled" ? anomalies.value : { range: rangeMeta, anomalies: [] },
+      insights: insightFeed.status === "fulfilled" ? insightFeed.value.insights : [],
+      products: products.status === "fulfilled" ? products.value : { range: rangeMeta, items: [] },
+      tax: tax.status === "fulfilled" ? tax.value : { range: rangeMeta, subtotal_before_tax: "0", total_tax: "0", grand_total: "0", invoice_count: 0, effective_tax_rate: 0, top_sellers: [] },
+      diagnostics: diagnostics.status === "fulfilled" ? diagnostics.value : { range: rangeMeta, previous_range: rangeMeta, current_total: "0", previous_total: "0", delta_amount: "0", delta_percent: null, drivers: [] },
+      forecast: forecast.status === "fulfilled" ? forecast.value : { month: { period_month: rangeMeta.start.slice(0, 7), days_elapsed: 0, days_in_month: 30, spent_so_far: "0", daily_run_rate: "0", projected_total: "0" }, budgets: [] },
+      calendar: calendar.status === "fulfilled" ? calendar.value : { range: rangeMeta, days: [], legend: { levels: {} } },
+      recurring: recurring.status === "fulfilled" ? recurring.value : { lookback_months: 6, fixed_monthly_estimate: "0", variable_last_month: "0", recurring_items: [] },
+    });
+    setFailed(nextFailed);
+    setLoading(false);
+  }, [selectedMonth]);
 
   useEffect(() => {
     if (authReady) void load();
   }, [authReady, load]);
 
-  const trendMax = useMemo(() => maxAmount(data?.trends.points.map((p) => p.amount) ?? []), [data]);
-  const merchantMax = useMemo(() => maxAmount(data?.merchants.items.map((m) => m.total_amount) ?? []), [data]);
   const stats = useMemo(() => {
     if (!data) {
       return {
@@ -229,186 +303,357 @@ export default function AnalyticsClient() {
     return <p className="text-body-sm text-mute">Đang kiểm tra phiên đăng nhập...</p>;
   }
 
+  const rangeWindow = data ? `${formatDate(data.trends.range.start)} – ${formatDate(data.trends.range.end)}` : "";
+
   return (
     <div className="space-y-6">
       <header className="space-y-4">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-3xl">
-            <h1 className="text-xl font-bold tracking-tight text-ink">Phân tích chi tiết tiêu dùng</h1>
-            <p className="mt-0.5 text-sm text-ash">
-              Báo cáo phân bổ dòng tiền chi tiêu theo từng nhóm danh mục cụ thể.
+            <h1 className="text-xl font-bold tracking-tight text-ink">Phân tích chi tiêu</h1>
+            <p className="mt-0.5 text-sm text-mute">
+              Dashboard tài chính cá nhân: tổng quan, danh mục, dòng tiền, chứng từ và gợi ý.
+              {rangeWindow && <span className="ml-1 font-medium text-ink">Kỳ: {rangeWindow}</span>}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {RANGE_PRESETS.filter((item) => item !== "custom").map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setRange(item)}
-                className={`rounded-lg border px-3 py-2 text-button-sm transition-colors ${
-                  range === item
-                    ? "border-ink bg-ink text-on-dark"
-                    : "border-hairline-soft bg-surface-doc text-body hover:text-ink"
-                }`}
-              >
-                {RANGE_LABELS[item]}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              aria-label="Chọn tháng"
+              className="rounded-lg border border-ink bg-ink px-4 py-2 text-button-sm font-bold text-on-dark transition-colors hover:opacity-90"
+            >
+              {recentMonths(12).map((m) => (
+                <option key={m.value} value={m.value} className="bg-surface-card text-ink">{m.label}</option>
+              ))}
+            </select>
           </div>
         </div>
-        <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <AnalyticsStat icon={TrendingDown} label="Tổng chi tiêu" value={formatMoney(String(stats.spend))} detail="Theo giao dịch đã ghi sổ" tone="red" />
-          <AnalyticsStat icon={Activity} label="Tần suất giao dịch" value={`${stats.transactions} giao dịch`} detail="Trong kỳ đang xem" tone="neutral" />
-          <AnalyticsStat icon={PieChart} label="Danh mục nổi bật" value={stats.topCategory} detail="Chiếm tỷ trọng cao nhất" tone="green" />
-          <AnalyticsStat icon={Store} label="Cửa hàng nổi bật" value={stats.topMerchant} detail="Phát sinh nhiều nhất" tone="blue" />
-          <AnalyticsStat icon={ArrowUpRight} label="Bất thường" value={String(stats.anomalies)} detail="Cần kiểm tra" tone="purple" />
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <AnalyticsStat icon={TrendingDown} label="Tổng chi tiêu" value={formatMoney(String(stats.spend))} detail="Theo giao dịch đã ghi sổ" tone="blue" />
+          <AnalyticsStat icon={Activity} label="Số giao dịch" value={`${stats.transactions} giao dịch`} detail="Trong kỳ đang xem" tone="neutral" />
+          <AnalyticsStat icon={PieChart} label="Danh mục lớn nhất" value={stats.topCategory} detail={stats.topCategoryPct > 0 ? `Chiếm ${stats.topCategoryPct.toFixed(1)}% tổng chi` : "Chưa có dữ liệu"} tone="green" />
+          <AnalyticsStat icon={ArrowUpRight} label="Cảnh báo" value={`${stats.anomalies} giao dịch`} detail="Cần kiểm tra" tone="red" />
+          <AnalyticsStat icon={Store} label="Mức dùng ngân sách" value={stats.budgetPercent === null ? "—" : `${stats.budgetPercent}%`} detail={stats.budgetStatus} tone="purple" />
         </div>
       </header>
 
-      {error && (
+      {fatalError && (
         <div className="rounded-md border border-accent-red bg-accent-red-soft p-4 text-body-sm text-accent-red">
-          {error}
+          {fatalError}
+          <button type="button" className="ml-3 font-semibold underline" onClick={() => void load()}>Thử lại</button>
         </div>
       )}
 
-      {loading && <Card>Đang tải dữ liệu phân tích...</Card>}
+      {loading && <AnalyticsSkeleton />}
 
-      {data && !loading && (
-        <div className="grid gap-4 lg:grid-cols-12">
-          <section className="lg:col-span-8 space-y-4">
-            <Card className="space-y-4 border-hairline-soft bg-surface-card">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
-                    <Calendar className="h-4 w-4 text-mute" aria-hidden />
-                    Biểu đồ phân phối chi phí theo thời gian
-                  </h2>
-                  <p className="text-caption-sm text-mute">Theo {data.trends.group_by === "week" ? "tuần" : "ngày"}</p>
-                </div>
-                <Badge tone="blue">{data.trends.points.length} điểm</Badge>
-              </div>
-              <div className="flex h-56 items-stretch gap-2 border-b border-hairline-soft pb-3">
-                {data.trends.points.length === 0 ? (
-                  <p className="self-center text-body-sm text-mute">Chưa có giao dịch trong kỳ này.</p>
-                ) : (
-                  data.trends.points.map((point) => {
-                    const height = Math.max(2, ((Number(point.amount) || 0) / trendMax) * 100);
-                    return (
-                      <div key={`${point.period_start}-${point.period_end}`} className="flex min-w-8 flex-1 flex-col items-center justify-end gap-2">
-                        <div className="flex w-full flex-1 items-end">
-                          <div className="w-full rounded-sm bg-accent-blue transition-all" style={{ height: `${height}%` }} title={formatMoney(point.amount)} />
-                        </div>
-                        <span className="text-[11px] text-mute">{formatDate(point.period_start).slice(0, 5)}</span>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </Card>
+      {data && !loading && !fatalError && (
+        <>
+          {/* Insight summary banner — ngôn ngữ tự nhiên */}
+          {summaryText && (
+            <div className="flex items-start gap-3 rounded-xl border border-accent-blue-soft bg-accent-blue-soft/40 p-4">
+              <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-accent-blue" aria-hidden />
+              <p className="text-body-sm text-ink">{summaryText}</p>
+            </div>
+          )}
 
-            <Card className="space-y-4 border-hairline-soft bg-surface-card">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
-                  <PieChart className="h-4 w-4 text-mute" aria-hidden />
-                  Biểu đồ phân phối chi phí danh mục
-                </h2>
-                <Link href="/budgets" className="text-button-sm text-accent-green hover:underline">Quản lý ngân sách</Link>
-              </div>
-              <div className="space-y-3">
-                {data.categories.map((category) => {
-                  const Icon = categoryIcon(category.name);
-                  return (
-                  <div key={`${category.category_id}-${category.name}`} className="space-y-1 rounded-lg border border-hairline-soft bg-surface-doc p-3">
-                    <div className="flex justify-between gap-3 text-body-sm">
-                      <span className="flex min-w-0 items-center gap-2 font-semibold text-ink">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white text-mute">
-                          <Icon className="h-4 w-4" aria-hidden />
-                        </span>
-                        <span className="truncate">{category.name}</span>
-                      </span>
-                      <span className="shrink-0 text-mute">{formatMoney(category.total_amount)}</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-surface-soft">
-                      <div className="h-full rounded-full bg-accent-green" style={{ width: `${Math.min(100, category.percentage)}%` }} />
-                    </div>
-                  </div>
-                );})}
-                {data.categories.length === 0 && <p className="text-body-sm text-mute">Chưa có dữ liệu danh mục.</p>}
-              </div>
-            </Card>
+          {/* Tab bar */}
+          <div className="flex gap-1 overflow-x-auto rounded-full border border-hairline-soft bg-surface-card p-1">
+            {TABS.map((t) => (
+              <PillTab key={t.key} active={tab === t.key} onClick={() => setTab(t.key)}>
+                {t.label}
+              </PillTab>
+            ))}
+          </div>
 
-            <DiagnosticsCard data={data.diagnostics} />
+          {tab === "overview" && (
+            <div className="grid gap-4 lg:grid-cols-12">
+              <section className="lg:col-span-8 space-y-4">
+                <Section failed={failed.has("trends")} onRetry={load} title="Xu hướng chi tiêu"><TrendCard data={data} /></Section>
+                <Section failed={failed.has("diagnostics")} onRetry={load} title="Vì sao chi tiêu thay đổi"><DiagnosticsCard data={data.diagnostics} /></Section>
+              </section>
+              <aside className="lg:col-span-4 space-y-4">
+                <Section failed={failed.has("forecast")} onRetry={load} title="Dự báo cuối tháng"><ForecastCard data={data.forecast} /></Section>
+                <Section failed={failed.has("anomalies")} onRetry={load} title="Giao dịch cần kiểm tra"><AnomaliesCard data={data.anomalies} /></Section>
+              </aside>
+            </div>
+          )}
 
-            <CalendarHeatmapCard data={data.calendar} />
+          {tab === "categories" && (
+            <div className="grid gap-4 lg:grid-cols-12">
+              <section className="lg:col-span-7 space-y-4">
+                <Section failed={failed.has("categories")} onRetry={load} title="Phân bổ danh mục"><CategoryListCard categories={data.categories} /></Section>
+              </section>
+              <aside className="lg:col-span-5 space-y-4">
+                <Section failed={failed.has("merchants")} onRetry={load} title="Cửa hàng nổi bật"><MerchantsCard data={data.merchants} /></Section>
+              </aside>
+            </div>
+          )}
 
-            <ProductsCard data={data.products} />
+          {tab === "cashflow" && (
+            <div className="grid gap-4 lg:grid-cols-12">
+              <section className="lg:col-span-8 space-y-4">
+                <Section failed={failed.has("trends")} onRetry={load} title="Xu hướng chi tiêu"><TrendCard data={data} /></Section>
+                <Section failed={failed.has("calendar")} onRetry={load} title="Lịch nhiệt chi tiêu"><CalendarHeatmapCard data={data.calendar} /></Section>
+              </section>
+              <aside className="lg:col-span-4 space-y-4">
+                <Section failed={failed.has("recurring")} onRetry={load} title="Chi cố định vs biến đổi"><RecurringCard data={data.recurring} /></Section>
+              </aside>
+            </div>
+          )}
 
-            <TaxCard data={data.tax} />
-          </section>
+          {tab === "documents" && (
+            <div className="grid gap-4 lg:grid-cols-12">
+              <section className="lg:col-span-7 space-y-4">
+                <Section failed={failed.has("products")} onRetry={load} title="Top sản phẩm / món"><ProductsCard data={data.products} /></Section>
+              </section>
+              <aside className="lg:col-span-5 space-y-4">
+                <Section failed={failed.has("tax")} onRetry={load} title="VAT & người bán"><TaxCard data={data.tax} /></Section>
+                <Section failed={failed.has("merchants")} onRetry={load} title="Cửa hàng nổi bật"><MerchantsCard data={data.merchants} /></Section>
+              </aside>
+            </div>
+          )}
 
-          <aside className="lg:col-span-4 space-y-4">
-            <ForecastCard data={data.forecast} />
-
-            <RecurringCard data={data.recurring} />
-
-            <Card className="space-y-4 border-hairline-soft bg-surface-card">
-              <h2 className="text-heading-sm-mixed text-ink">Cửa hàng nổi bật</h2>
-              <div className="space-y-3">
-                {data.merchants.items.map((merchant) => {
-                  const width = ((Number(merchant.total_amount) || 0) / merchantMax) * 100;
-                  return (
-                    <div key={merchant.merchant_name} className="space-y-1">
-                      <div className="flex justify-between gap-3 text-caption-sm">
-                        <span className="truncate text-ink">{merchant.merchant_name}</span>
-                        <span className="text-mute">{formatMoney(merchant.total_amount)}</span>
-                      </div>
-                      <div className="h-1.5 rounded-full bg-surface-soft">
-                        <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(4, width)}%` }} />
-                      </div>
-                    </div>
-                  );
-                })}
-                {data.merchants.items.length === 0 && <p className="text-body-sm text-mute">Chưa có merchant.</p>}
-              </div>
-            </Card>
-
-            <Card className="space-y-3 border-hairline-soft bg-surface-card">
-              <h2 className="text-heading-sm-mixed text-ink">Gợi ý cần xem lại</h2>
-              {data.anomalies.anomalies.map((item) => (
-                <Link key={item.id} href={`/transactions/${item.transaction_id}`} className="block rounded-md border border-hairline-soft p-3 hover:bg-surface-soft">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-caption-md text-ink">{item.title}</span>
-                    <Badge tone={item.severity === "danger" ? "red" : "purple"}>{item.severity}</Badge>
-                  </div>
-                  <p className="mt-1 text-caption-sm text-mute">{item.reason}</p>
-                </Link>
-              ))}
-              {data.anomalies.anomalies.length === 0 && <p className="text-body-sm text-mute">Không có bất thường nổi bật.</p>}
-            </Card>
-
-            <Card className="space-y-3 border-hairline-soft bg-surface-card">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-heading-sm-mixed text-ink">Insight nhanh</h2>
-                <Link href="/insights" className="text-button-sm text-accent-green hover:underline">Mở</Link>
-              </div>
-              {data.insights.map((insight) => (
-                <div key={insight.id} className="border-b border-hairline-soft pb-3 last:border-0 last:pb-0">
-                  <Badge tone={insight.severity === "danger" || insight.severity === "warning" ? "red" : "green"}>{insight.severity}</Badge>
-                  <p className="mt-2 text-caption-md text-ink">{insight.title}</p>
-                  <p className="mt-1 text-caption-sm text-mute">{insight.summary}</p>
-                </div>
-              ))}
-              {data.insights.length === 0 && <p className="text-body-sm text-mute">Chưa có insight.</p>}
-            </Card>
-          </aside>
-        </div>
+          {tab === "advice" && (
+            <div className="grid gap-4 lg:grid-cols-12">
+              <section className="lg:col-span-7 space-y-4">
+                <Section failed={failed.has("insights")} onRetry={load} title="Gợi ý từ dữ liệu"><InsightsCard insights={data.insights} /></Section>
+              </section>
+              <aside className="lg:col-span-5 space-y-4">
+                <Section failed={failed.has("forecast")} onRetry={load} title="Dự báo cuối tháng"><ForecastCard data={data.forecast} /></Section>
+                <Section failed={failed.has("anomalies")} onRetry={load} title="Giao dịch cần kiểm tra"><AnomaliesCard data={data.anomalies} /></Section>
+              </aside>
+            </div>
+          )}
+        </>
       )}
 
       <div className="flex justify-end">
-        <Button variant="secondary" onClick={() => void load()}>Làm mới phân tích</Button>
+        <Button variant="secondary" onClick={() => void load()} disabled={loading}>Làm mới phân tích</Button>
       </div>
     </div>
   );
+}
+
+/** Bọc 1 card: nếu section fetch lỗi → hiện thông báo + nút Thử lại thay vì card. */
+function Section({
+  failed,
+  onRetry,
+  title,
+  children,
+}: {
+  failed: boolean;
+  onRetry: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  if (!failed) return <>{children}</>;
+  return (
+    <Card className="space-y-3 border-accent-red/30 bg-surface-card">
+      <h2 className="text-heading-sm-mixed text-ink">{title}</h2>
+      <p className="text-body-sm text-mute">Không tải được phần này.</p>
+      <Button variant="secondary" size="sm" onClick={onRetry}>Thử lại</Button>
+    </Card>
+  );
+}
+
+/** Skeleton loading khớp layout thật (KPI row + 2 cột card) để tránh layout shift. */
+function AnalyticsSkeleton() {
+  return (
+    <div className="space-y-6" aria-hidden>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="h-24 animate-pulse rounded-xl border border-hairline-soft bg-surface-soft" />
+        ))}
+      </div>
+      <div className="h-14 animate-pulse rounded-xl border border-hairline-soft bg-surface-soft" />
+      <div className="grid gap-4 lg:grid-cols-12">
+        <div className="space-y-4 lg:col-span-8">
+          <div className="h-64 animate-pulse rounded-lg border border-hairline-soft bg-surface-soft" />
+          <div className="h-48 animate-pulse rounded-lg border border-hairline-soft bg-surface-soft" />
+        </div>
+        <div className="space-y-4 lg:col-span-4">
+          <div className="h-48 animate-pulse rounded-lg border border-hairline-soft bg-surface-soft" />
+          <div className="h-40 animate-pulse rounded-lg border border-hairline-soft bg-surface-soft" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Empty-state có icon + câu giải thích + CTA. */
+function EmptyState({
+  icon: Icon,
+  message,
+  ctaLabel,
+  ctaHref,
+}: {
+  icon: LucideIcon;
+  message: string;
+  ctaLabel?: string;
+  ctaHref?: string;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-hairline bg-surface-doc px-4 py-8 text-center">
+      <Icon className="h-7 w-7 text-ash" aria-hidden />
+      <p className="max-w-xs text-body-sm text-mute">{message}</p>
+      {ctaLabel && ctaHref && (
+        <Link href={ctaHref}>
+          <Button variant="secondary" size="sm">{ctaLabel}</Button>
+        </Link>
+      )}
+    </div>
+  );
+}
+
+function TrendCard({ data }: { data: AnalyticsState }) {
+  return (
+    <Card className="space-y-4 border-hairline-soft bg-surface-card">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
+            <Calendar className="h-4 w-4 text-mute" aria-hidden />
+            Xu hướng chi tiêu theo thời gian
+          </h2>
+          <p className="text-caption-sm text-mute">Theo {data.trends.group_by === "week" ? "tuần" : "ngày"}</p>
+        </div>
+        <Badge tone="blue">{data.trends.points.length} điểm</Badge>
+      </div>
+      {data.trends.points.length === 0 ? (
+        <EmptyState icon={Calendar} message="Chưa có giao dịch trong kỳ này. Thử mở rộng khoảng thời gian hoặc thêm giao dịch." ctaLabel="Thêm giao dịch" ctaHref="/transactions/new" />
+      ) : (
+        <TrendAreaChart points={data.trends.points} />
+      )}
+    </Card>
+  );
+}
+
+function CategoryListCard({ categories }: { categories: CategoryBreakdown[] }) {
+  const total = categories.reduce((s, c) => s + (Number(c.total_amount) || 0), 0);
+  const donutData: DonutDatum[] = categories.map((c, i) => ({
+    name: c.name,
+    value: Number(c.total_amount) || 0,
+    color: categoryColor(c.name, c.color, i),
+    percentage: c.percentage,
+  }));
+  return (
+    <Card className="space-y-4 border-hairline-soft bg-surface-card">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
+          <PieChart className="h-4 w-4 text-mute" aria-hidden />
+          Phân bổ chi phí theo danh mục
+        </h2>
+        <Link href="/budgets" className="text-button-sm text-accent-green hover:underline">Quản lý ngân sách</Link>
+      </div>
+      {categories.length === 0 ? (
+        <EmptyState icon={PieChart} message="Chưa có dữ liệu danh mục trong kỳ này. Thử mở rộng khoảng thời gian." ctaLabel="Thêm giao dịch" ctaHref="/transactions/new" />
+      ) : (
+        <>
+          <CategoryDonut data={donutData} total={total} />
+          <div className="space-y-3 border-t border-hairline-soft pt-3">
+            {categories.map((category, i) => {
+              const Icon = categoryIcon(category.name);
+              const color = categoryColor(category.name, category.color, i);
+              return (
+                <div key={`${category.category_id}-${category.name}`} className="space-y-1">
+                  <div className="flex justify-between gap-3 text-body-sm">
+                    <span className="flex min-w-0 items-center gap-2 font-semibold text-ink">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md" style={{ background: `${color}1a`, color }}>
+                        <Icon className="h-4 w-4" aria-hidden />
+                      </span>
+                      <span className="truncate">{category.name}</span>
+                    </span>
+                    <span className="shrink-0 text-mute">{formatMoney(category.total_amount)} · {category.percentage.toFixed(1)}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-surface-soft">
+                    <div className="h-full rounded-full" style={{ width: `${Math.min(100, category.percentage)}%`, background: color }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function MerchantsCard({ data }: { data: AnalyticsMerchantsResponse }) {
+  const bars: HBarDatum[] = data.items.map((m) => ({
+    name: m.merchant_name,
+    value: Number(m.total_amount) || 0,
+  }));
+  return (
+    <Card className="space-y-4 border-hairline-soft bg-surface-card">
+      <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
+        <Store className="h-4 w-4 text-mute" aria-hidden />
+        Cửa hàng nổi bật
+      </h2>
+      {data.items.length === 0 ? (
+        <EmptyState icon={Store} message="Chưa có cửa hàng nào trong kỳ này. Thử mở rộng khoảng thời gian." />
+      ) : (
+        <HorizontalBarChart data={bars} maxItems={8} />
+      )}
+    </Card>
+  );
+}
+
+function AnomaliesCard({ data }: { data: AnalyticsAnomaliesResponse }) {
+  return (
+    <Card className="space-y-3 border-hairline-soft bg-surface-card">
+      <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
+        <ArrowUpRight className="h-4 w-4 text-mute" aria-hidden />
+        Giao dịch cần kiểm tra
+      </h2>
+      {data.anomalies.map((item) => (
+        <Link key={item.id} href={`/transactions/${item.transaction_id}`} className="block rounded-md border border-hairline-soft p-3 hover:bg-surface-soft">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-caption-md text-ink">{item.title}</span>
+            <Badge tone={item.severity === "danger" ? "red" : "purple"}>{item.severity === "danger" ? "Rủi ro" : "Cần xem"}</Badge>
+          </div>
+          <p className="mt-1 text-caption-sm text-mute">{item.reason}</p>
+        </Link>
+      ))}
+      {data.anomalies.length === 0 && (
+        <EmptyState icon={ArrowUpRight} message="Không có giao dịch bất thường trong kỳ này." />
+      )}
+    </Card>
+  );
+}
+
+function InsightsCard({ insights }: { insights: Insight[] }) {
+  return (
+    <Card className="space-y-3 border-hairline-soft bg-surface-card">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-heading-sm-mixed text-ink">
+          <Sparkles className="h-4 w-4 text-mute" aria-hidden />
+          Gợi ý từ dữ liệu
+        </h2>
+        <Link href="/insights" className="text-button-sm text-accent-green hover:underline">Mở tất cả</Link>
+      </div>
+      {insights.map((insight) => (
+        <div key={insight.id} className="rounded-lg border border-hairline-soft bg-surface-doc p-3">
+          <Badge tone={insight.severity === "danger" || insight.severity === "warning" ? "red" : "green"}>{severityLabel(insight.severity)}</Badge>
+          <p className="mt-2 text-caption-md text-ink">{insight.title}</p>
+          <p className="mt-1 text-caption-sm text-mute">{insight.summary}</p>
+        </div>
+      ))}
+      {insights.length === 0 && (
+        <EmptyState icon={Sparkles} message="Chưa có gợi ý. Thêm giao dịch để nhận phân tích tự động." ctaLabel="Thêm giao dịch" ctaHref="/transactions/new" />
+      )}
+    </Card>
+  );
+}
+
+function severityLabel(severity: string): string {
+  switch (severity) {
+    case "danger": return "Rủi ro";
+    case "warning": return "Cảnh báo";
+    case "watch": return "Cần chú ý";
+    case "success": return "Tốt";
+    default: return "Thông tin";
+  }
 }
 
 function AnalyticsStat({ icon: Icon, label, value, detail, tone }: { icon: LucideIcon; label: string; value: string; detail: string; tone: "neutral" | "red" | "green" | "blue" | "purple" }) {
@@ -555,6 +800,10 @@ function DiagnosticsCard({ data }: { data: import("@/lib/analytics-api").Analyti
 }
 
 function ProductsCard({ data }: { data: import("@/lib/analytics-api").AnalyticsProductsResponse }) {
+  const bars: HBarDatum[] = data.items.map((p) => ({
+    name: p.item_name,
+    value: Number(p.total_amount) || 0,
+  }));
   return (
     <Card className="space-y-4 border-hairline-soft bg-surface-card">
       <div>
@@ -565,25 +814,9 @@ function ProductsCard({ data }: { data: import("@/lib/analytics-api").AnalyticsP
         <p className="text-caption-sm text-mute">Dựa trên hóa đơn OCR đã xác nhận</p>
       </div>
       {data.items.length === 0 ? (
-        <p className="text-body-sm text-mute">Chưa có dữ liệu sản phẩm. Hãy tải hóa đơn lên để bóc tách chi tiết món.</p>
+        <EmptyState icon={ShoppingBag} message="Chưa có dữ liệu sản phẩm. Hãy tải hóa đơn lên để bóc tách chi tiết món." ctaLabel="Tải hóa đơn lên" ctaHref="/receipts/upload" />
       ) : (
-        <div className="space-y-2">
-          {data.items.map((p) => (
-            <div key={p.item_name} className="space-y-1 rounded-lg border border-hairline-soft bg-surface-doc p-3">
-              <div className="flex justify-between gap-3 text-body-sm">
-                <span className="min-w-0 truncate font-medium text-ink">{p.item_name}</span>
-                <span className="shrink-0 text-mute">{formatMoney(p.total_amount)}</span>
-              </div>
-              <div className="flex items-center justify-between gap-2 text-caption-sm text-mute">
-                <span>SL {Number(p.total_quantity).toLocaleString("vi-VN", { maximumFractionDigits: 2 })} · {p.line_count} dòng</span>
-                <span>{p.percentage.toFixed(0)}%</span>
-              </div>
-              <div className="h-1.5 rounded-full bg-surface-soft">
-                <div className="h-full rounded-full bg-accent-green" style={{ width: `${Math.min(100, p.percentage)}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
+        <HorizontalBarChart data={bars} maxItems={8} />
       )}
     </Card>
   );

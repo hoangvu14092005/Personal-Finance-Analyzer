@@ -6,6 +6,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle,
+  Eye,
   FileText,
   Filter,
   ReceiptText,
@@ -20,6 +21,7 @@ import {
   ReceiptListItem,
   ReceiptListMeta,
   listReceipts,
+  receiptFileUrl,
 } from "@/lib/receipts-api";
 import {
   Badge,
@@ -450,6 +452,16 @@ function ReceiptRow({ receipt }: { receipt: ReceiptListItem }) {
       </td>
       <td className="px-4 py-3 text-right">
         <div className="flex flex-wrap justify-end gap-2">
+          <a
+            href={receiptFileUrl(receipt.receipt_id)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Button type="button" variant="secondary" size="sm">
+              <Eye className="h-4 w-4" aria-hidden />
+              Xem hóa đơn
+            </Button>
+          </a>
           <Link href={`/receipts/${receipt.receipt_id}/review`}>
             <Button type="button" variant="secondary" size="sm">
               Kiểm tra

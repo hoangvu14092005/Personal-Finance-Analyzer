@@ -119,6 +119,11 @@ type NavUser = {
   currency: string;
 };
 
+type NavUserState = {
+  isLoading: boolean;
+  user: NavUser | null;
+};
+
 function deriveInitials(name: string, email: string): string {
   const source = name.trim() || email.trim();
   if (!source) return "U";
@@ -129,8 +134,12 @@ function deriveInitials(name: string, email: string): string {
   return source.slice(0, 2).toUpperCase();
 }
 
-function useNavUser(): NavUser | null {
-  const [user, setUser] = useState<NavUser | null>(null);
+function useNavUser(): NavUserState {
+  const [state, setState] = useState<NavUserState>({
+    isLoading: true,
+    user: null,
+  });
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -138,25 +147,37 @@ function useNavUser(): NavUser | null {
         const { user: profile } = await getMe();
         if (cancelled) return;
         const displayName = profile.full_name?.trim() || profile.email;
-        setUser({
-          displayName,
-          initials: deriveInitials(profile.full_name ?? "", profile.email),
-          currency: profile.currency,
+        setState({
+          isLoading: false,
+          user: {
+            displayName,
+            initials: deriveInitials(profile.full_name ?? "", profile.email),
+            currency: profile.currency,
+          },
         });
       } catch {
-        // chưa đăng nhập / lỗi mạng — giữ null, không hiển thị block user.
+        if (cancelled) return;
+        setState({
+          isLoading: false,
+          user: null,
+        });
       }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
-  return user;
+  return state;
 }
 
 export function Nav() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const user = useNavUser();
+  const { isLoading, user } = useNavUser();
+  const displayName = isLoading
+    ? "Đang tải..."
+    : user?.displayName ?? "Chưa đăng nhập";
+  const initials = isLoading ? "··" : user?.initials ?? "--";
+  const currency = user?.currency ?? "VND";
 
   return (
     <>
@@ -174,17 +195,17 @@ export function Nav() {
         </div>
 
         <div className="border-b border-hairline-soft bg-surface-soft/50 p-5">
-          <div className="flex items-center gap-3.5">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-accent-green-soft bg-accent-green-soft text-sm font-bold text-accent-green">
-              {user?.initials ?? "··"}
+            <div className="flex items-center gap-3.5">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full border border-accent-green-soft bg-accent-green-soft text-sm font-bold text-accent-green">
+              {initials}
             </div>
             <div className="min-w-0">
               <h4 className="truncate text-sm font-semibold leading-snug text-ink">
-                {user?.displayName ?? "Đang tải..."}
+                {displayName}
               </h4>
               <span className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-accent-green-soft px-2 py-0.5 text-[10px] font-medium text-accent-green">
                 <span className="h-1 w-1 rounded-full bg-accent-green" />
-                Đơn vị: {user?.currency ?? "VND"}
+                Đơn vị: {currency}
               </span>
             </div>
           </div>

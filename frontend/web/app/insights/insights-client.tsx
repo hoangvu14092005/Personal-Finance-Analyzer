@@ -36,8 +36,89 @@ function toneForSeverity(severity: InsightSeverity): "blue" | "green" | "red" | 
   return "blue";
 }
 
+function formatDmy(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return y && m && d ? `${d}/${m}/${y}` : iso;
+}
+
 function formatRange(insight: Insight): string {
-  return `${insight.range_start} → ${insight.range_end}`;
+  return `${formatDmy(insight.range_start)} → ${formatDmy(insight.range_end)}`;
+}
+
+const SEVERITY_LABELS: Record<string, string> = {
+  danger: "Rủi ro",
+  warning: "Cảnh báo",
+  watch: "Cần chú ý",
+  success: "Tốt",
+  info: "Thông tin",
+};
+
+function severityLabel(severity: string): string {
+  return SEVERITY_LABELS[severity] ?? "Thông tin";
+}
+
+// Chỉ hiển thị các trường evidence có ý nghĩa với người dùng (bỏ trường kỹ thuật).
+// Mỗi entry: nhãn tiếng Việt + cách format giá trị.
+const EVIDENCE_FIELDS: Record<string, { label: string; kind: "money" | "percent" | "count" | "text" }> = {
+  total_amount: { label: "Số tiền", kind: "money" },
+  current_amount: { label: "Kỳ này", kind: "money" },
+  previous_amount: { label: "Kỳ trước", kind: "money" },
+  current_total: { label: "Tổng kỳ này", kind: "money" },
+  previous_total: { label: "Tổng kỳ trước", kind: "money" },
+  delta_amount: { label: "Chênh lệch", kind: "money" },
+  budget_amount: { label: "Ngân sách", kind: "money" },
+  spent_amount: { label: "Đã chi", kind: "money" },
+  spent_so_far: { label: "Đã chi", kind: "money" },
+  projected_spend: { label: "Dự kiến", kind: "money" },
+  weekday_avg: { label: "TB ngày thường", kind: "money" },
+  weekend_avg: { label: "TB cuối tuần", kind: "money" },
+  percentage: { label: "Tỷ trọng", kind: "percent" },
+  percent_used: { label: "Đã dùng", kind: "percent" },
+  projected_percent: { label: "Dự kiến dùng", kind: "percent" },
+  delta_percent: { label: "Thay đổi", kind: "percent" },
+  transaction_count: { label: "Số giao dịch", kind: "count" },
+  new_merchant_count: { label: "Cửa hàng mới", kind: "count" },
+  category_name: { label: "Danh mục", kind: "text" },
+  merchant_name: { label: "Cửa hàng", kind: "text" },
+  projected_exceed_date: { label: "Dự kiến chạm hạn mức", kind: "text" },
+};
+
+function formatVndFromRaw(raw: unknown): string {
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return String(raw);
+  return `${Math.round(num).toLocaleString("vi-VN", { maximumFractionDigits: 0 })} VND`;
+}
+
+function formatEvidenceValue(kind: string, value: unknown): string {
+  switch (kind) {
+    case "money":
+      return formatVndFromRaw(value);
+    case "percent": {
+      const n = Number(value);
+      return Number.isFinite(n) ? `${n.toFixed(1)}%` : String(value);
+    }
+    case "count": {
+      const n = Number(value);
+      return Number.isFinite(n) ? `${n} giao dịch` : String(value);
+    }
+    default:
+      return String(value);
+  }
+}
+
+/** Rút các trường evidence có ý nghĩa thành list {label, value} đã format. */
+function readableEvidence(evidence: Record<string, unknown>[]): Array<{ label: string; value: string }> {
+  const out: Array<{ label: string; value: string }> = [];
+  const seen = new Set<string>();
+  for (const row of evidence) {
+    for (const [key, raw] of Object.entries(row)) {
+      const field = EVIDENCE_FIELDS[key];
+      if (!field || seen.has(key) || raw === null || raw === undefined || raw === "") continue;
+      seen.add(key);
+      out.push({ label: field.label, value: formatEvidenceValue(field.kind, raw) });
+    }
+  }
+  return out;
 }
 
 type InsightAction = { type?: string; label?: string; params?: Record<string, unknown> };
@@ -198,21 +279,24 @@ export default function InsightsClient() {
           {items.map((insight) => (
             <Card key={insight.id} className="space-y-4 border-hairline-soft bg-surface-card">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <Badge tone={toneForSeverity(insight.severity)}>{insight.severity}</Badge>
+                <Badge tone={toneForSeverity(insight.severity)}>{severityLabel(insight.severity)}</Badge>
                 <span className="text-caption-sm text-mute">{formatRange(insight)}</span>
               </div>
               <div>
                 <h2 className="text-heading-sm-mixed text-ink">{insight.title}</h2>
                 <p className="mt-2 text-body-sm text-body">{insight.summary}</p>
               </div>
-              {insight.evidence.length > 0 && (
+              {readableEvidence(insight.evidence).length > 0 && (
                 <div className="rounded-md border border-hairline-soft bg-surface-doc p-3">
-                  <p className="text-caption-xs text-mute">Bằng chứng</p>
-                  <div className="mt-2 space-y-1 text-caption-sm text-body">
-                    {insight.evidence.slice(0, 3).map((evidence, idx) => (
-                      <p key={idx}>{Object.entries(evidence).map(([key, value]) => `${key}: ${String(value)}`).join(" · ")}</p>
+                  <p className="text-caption-xs font-bold uppercase tracking-wide text-mute">Số liệu</p>
+                  <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    {readableEvidence(insight.evidence).map((item) => (
+                      <div key={item.label} className="flex justify-between gap-2 text-caption-sm">
+                        <dt className="text-mute">{item.label}</dt>
+                        <dd className="font-medium text-ink">{item.value}</dd>
+                      </div>
                     ))}
-                  </div>
+                  </dl>
                 </div>
               )}
               {insight.actions.length > 0 && (

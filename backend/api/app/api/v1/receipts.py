@@ -3,11 +3,13 @@
 import os
 from datetime import date
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from pfa_shared.enums import ReceiptStatus
+from pfa_shared.storage import StorageNotFoundError
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
@@ -365,6 +367,35 @@ def get_receipt_image(
     if current_user.id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
     return receipt_image_response(session, receipt_id=receipt_id, user_id=current_user.id)
+
+
+@router.get("/{receipt_id}/file")
+def get_receipt_file(
+    receipt_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    if current_user.id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+
+    receipt = ensure_receipt_owner(session, receipt_id, current_user.id)
+    try:
+        content = get_storage_service().download_bytes(receipt.storage_key)
+    except StorageNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Receipt file not found",
+        ) from exc
+
+    file_name = quote(receipt.file_name or f"receipt-{receipt_id}")
+    return Response(
+        content=content,
+        media_type=receipt.content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{file_name}",
+            "Cache-Control": "private, max-age=60",
+        },
+    )
 
 
 @router.get("/{receipt_id}/line-items", response_model=list[LineItemResponse])

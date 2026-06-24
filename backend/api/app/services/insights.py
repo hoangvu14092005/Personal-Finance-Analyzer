@@ -44,6 +44,11 @@ def _decimal_str(value: Decimal) -> str:
     return f"{value:.2f}"
 
 
+def _money(value: Decimal) -> str:
+    """Format tiền kiểu Việt cho text hiển thị: 3028324 -> '3.028.324 VND'."""
+    return f"{int(value):,}".replace(",", ".") + " VND"
+
+
 def _user_allows_ai(session: Session, user_id: int) -> bool:
     """Đọc cờ allow_ai_data_processing. Mặc định True nếu chưa có settings row."""
     settings = session.exec(
@@ -272,8 +277,8 @@ def generate_rule_based_insights(
                 severity=severity,
                 title=f"{top.name} là danh mục chi nhiều nhất",
                 summary=(
-                    f"Bạn đã chi {_decimal_str(top.total_amount)} VND cho {top.name}, "
-                    f"chiếm {top.percentage:.2f}% tổng chi trong kỳ."
+                    f"Bạn đã chi {_money(top.total_amount)} cho {top.name}, "
+                    f"chiếm {top.percentage:.1f}% tổng chi trong kỳ."
                 ),
                 evidence=[
                     {
@@ -310,10 +315,10 @@ def generate_rule_based_insights(
                 user_id=user_id,
                 type_="period_change",
                 severity=severity,
-                title=f"Chi tiêu {direction} {abs(summary.delta_percent):.2f}% so với kỳ trước",
+                title=f"Chi tiêu {direction} {abs(summary.delta_percent):.1f}% so với kỳ trước",
                 summary=(
-                    f"Kỳ này tổng chi là {_decimal_str(summary.current.total_spend)} VND, "
-                    f"chênh {_decimal_str(summary.delta_amount)} VND so với kỳ trước."
+                    f"Kỳ này tổng chi là {_money(summary.current.total_spend)}, "
+                    f"chênh {_money(abs(summary.delta_amount))} so với kỳ trước."
                 ),
                 evidence=[
                     {
@@ -343,7 +348,7 @@ def generate_rule_based_insights(
                 severity="danger",
                 title=f"{usage.category_name} đã vượt ngân sách",
                 summary=(
-                    f"Bạn đã dùng {usage.percent_used:.2f}% ngân sách {usage.category_name} "
+                    f"Bạn đã dùng {usage.percent_used:.0f}% ngân sách {usage.category_name} "
                     f"trong {period_month}."
                 ),
                 evidence=[
@@ -409,7 +414,7 @@ def _generate_advanced_insights(
                     title=f"{b.category_name} dự báo sẽ vượt ngân sách",
                     summary=(
                         f"Theo nhịp chi hiện tại, {b.category_name} dự kiến đạt "
-                        f"{_decimal_str(b.projected_spend)} VND "
+                        f"{_money(b.projected_spend)} "
                         f"({b.projected_percent:.0f}% ngân sách) cuối tháng."
                         + (f" Dự kiến chạm hạn mức ngày {exceed_date}." if exceed_date else "")
                     ),
@@ -464,7 +469,7 @@ def _generate_advanced_insights(
                     severity="watch",
                     title=f"{surge.category_name} tăng mạnh so với kỳ trước",
                     summary=(
-                        f"{surge.category_name} tăng {_decimal_str(surge.delta_amount)} VND "
+                        f"{surge.category_name} tăng {_money(surge.delta_amount)} "
                         f"(+{surge.delta_percent:.0f}%) so với kỳ trước."
                         + (f" Chủ yếu từ {top_m}." if top_m else "")
                     ),
@@ -517,7 +522,7 @@ def _generate_advanced_insights(
                     title=f"Cửa hàng mới: {top.merchant_name}",
                     summary=(
                         f"Bạn lần đầu chi tại {top.merchant_name} "
-                        f"({_decimal_str(top.total_amount)} VND) trong kỳ này."
+                        f"({_money(top.total_amount)}) trong kỳ này."
                         + (f" Và {extra} cửa hàng mới khác." if extra > 0 else "")
                     ),
                     evidence=[
@@ -554,8 +559,8 @@ def _generate_advanced_insights(
                         title="Chi cuối tuần cao hơn ngày thường",
                         summary=(
                             f"Trung bình mỗi ngày cuối tuần bạn chi "
-                            f"{_decimal_str(we_avg)} VND, bằng {ratio:.0f}% so với "
-                            f"ngày thường ({_decimal_str(wd_avg)} VND/ngày)."
+                            f"{_money(we_avg)}, bằng {ratio:.0f}% so với "
+                            f"ngày thường ({_money(wd_avg)}/ngày)."
                         ),
                         evidence=[
                             {

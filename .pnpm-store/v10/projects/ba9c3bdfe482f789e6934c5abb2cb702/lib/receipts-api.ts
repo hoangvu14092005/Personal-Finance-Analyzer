@@ -165,6 +165,10 @@ export async function getReceiptStatus(receiptId: number): Promise<ReceiptStatus
   return jsonRequest<ReceiptStatus>(`/api/v1/receipts/${receiptId}`, { method: "GET" });
 }
 
+export function receiptFileUrl(receiptId: number): string {
+  return `${apiBaseUrl}/api/v1/receipts/${receiptId}/file`;
+}
+
 export async function getReceiptDraft(receiptId: number): Promise<DraftReview> {
   return jsonRequest<DraftReview>(`/api/v1/receipts/${receiptId}/draft`, { method: "GET" });
 }

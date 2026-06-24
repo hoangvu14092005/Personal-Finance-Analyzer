@@ -29,6 +29,12 @@ async function mockEverything(page: Page) {
     ["/api/v1/analytics/merchants**", { ...rangeOnly, items: [] }],
     ["/api/v1/analytics/anomalies**", { ...rangeOnly, anomalies: [] }],
     ["/api/v1/analytics/insight-feed**", { ...rangeOnly, hero: null, source: "x", meta: {}, insights: [] }],
+    ["/api/v1/analytics/products**", { ...rangeOnly, items: [] }],
+    ["/api/v1/analytics/tax**", { ...rangeOnly, subtotal_before_tax: "0", total_tax: "0", grand_total: "0", invoice_count: 0, effective_tax_rate: 0, top_sellers: [] }],
+    ["/api/v1/analytics/diagnostics**", { ...rangeOnly, previous_range: rangeOnly.range, current_total: "0", previous_total: "0", delta_amount: "0", delta_percent: null, drivers: [] }],
+    ["/api/v1/analytics/forecast**", { month: { period_month: "2026-05", days_elapsed: 29, days_in_month: 31, spent_so_far: "0", daily_run_rate: "0", projected_total: "0" }, budgets: [] }],
+    ["/api/v1/analytics/calendar**", { ...rangeOnly, days: [], legend: { levels: {} } }],
+    ["/api/v1/analytics/recurring**", { lookback_months: 6, fixed_monthly_estimate: "0", variable_last_month: "0", recurring_items: [] }],
     ["/api/v1/transactions**", { items: [], meta: { total: 0, page: 1, size: 20 } }],
     ["/api/v1/budgets**", { items: [] }],
     ["/api/v1/insights**", { items: [], has_more: false, next_before_id: null }],
@@ -55,7 +61,7 @@ test.describe("Sidebar navigation", () => {
     await page.goto("/dashboard");
     await page.getByRole("link", { name: "Phân tích chi tiêu" }).click();
     await expect(page).toHaveURL(/\/analytics/);
-    await expect(page.getByRole("heading", { name: "Phân tích chi tiết tiêu dùng" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Phân tích chi tiêu" })).toBeVisible();
   });
 
   test("navigates to transactions list", async ({ page }) => {

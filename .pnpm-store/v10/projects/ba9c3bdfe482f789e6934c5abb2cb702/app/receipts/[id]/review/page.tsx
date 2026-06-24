@@ -6,6 +6,7 @@ import { FormEvent, use, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle,
+  Eye,
   FileText,
   ReceiptText,
   Save,
@@ -22,6 +23,7 @@ import {
   getReceiptDraft,
   getReceiptInvoice,
   InvoiceData,
+  receiptFileUrl,
 } from "@/lib/receipts-api";
 import {
   Badge,
@@ -253,6 +255,13 @@ export default function ReceiptReviewPage({
             <Link href="/receipts">
               <Button type="button" variant="secondary" size="sm"><ReceiptText className="h-4 w-4" aria-hidden />Danh sách hóa đơn</Button>
             </Link>
+            <a
+              href={receiptFileUrl(receiptId)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Button type="button" variant="secondary" size="sm"><Eye className="h-4 w-4" aria-hidden />Xem hóa đơn</Button>
+            </a>
             <Link href="/receipts/upload">
               <Button type="button" variant="secondary" size="sm"><UploadCloud className="h-4 w-4" aria-hidden />Tải hóa đơn khác</Button>
             </Link>
